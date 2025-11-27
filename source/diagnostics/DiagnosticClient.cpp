@@ -21,7 +21,7 @@ void DiagnosticClient::setEngine(const DiagnosticEngine& newEngine) {
 }
 
 std::string DiagnosticClient::getFileName(SourceLocation location) const {
-    if (absPaths)
+    if (absPaths) // !!!
         return getU8Str(sourceManager->getFullPath(location.buffer()));
     else
         return std::string(sourceManager->getFileName(location));

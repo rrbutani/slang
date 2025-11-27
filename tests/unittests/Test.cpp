@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
+#include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/Preprocessor.h"
@@ -36,7 +37,7 @@ SourceManager& getSourceManager() {
     if (!sourceManager) {
         auto testDir = findTestDir();
         sourceManager = new SourceManager();
-        sourceManager->setDisableProximatePaths(true);
+        sourceManager->setPathStyle(PathStyle::Verbatim);
         setupSourceManager(*sourceManager);
     }
     return *sourceManager;

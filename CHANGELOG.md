@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Notable Breaking Changes
 * AST serialization: typedefs and enum type references are now printed as links to the original definition instead of repeating the type for each usage
+<!-- `DiagnosticClient.showAbsPaths` is gone, replaced with `DiagnosticsClient.setPathStyle` -->
+<!-- `SourceManager.setDisableProximatePaths` is gone, replaced with `SourceManager.setPathStyle` -->
 
 ### New Features
 * Added [-Wcase-none](https://sv-lang.com/warning-ref.html#case-none) which warns about constant case statements that don't match on any items
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * The `--compat` flag now accepts `all` to enable all compatibility flags at once, to maximize the chances that slang will accept your code that works with other tools but may not comply with the LRM
 * Added a `--disable-local-includes` flag to mimic the behavior of VCS where `` `include `` directives don't search relative to the including file
 * The `--std` argument now accepts `1364-2005` as a value, which disables all SystemVerilog keywords during parsing for Verilog compatibility (thanks to @povik)
+<!-- todo: `--diag-path-style`, `--diag-abs-paths` remains as an alias for `--diag-path-style canonical` -->
 
 ### Improvements
 * -Wcase-dup no longer warns if the duplicate items are all constant case items that don't match a known constant case expression

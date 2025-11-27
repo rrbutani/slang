@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <optional>
 #include "slang/ast/Compilation.h"
 #include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
@@ -239,8 +240,19 @@ public:
         /// If true, include macro expansion information in printed diagnostics.
         std::optional<bool> diagMacroExpansion;
 
-        /// If true, display absolute paths to files in printed diagnostics.
-        std::optional<bool> diagAbsPaths;
+        /// Controls the path style used in diagnostics and in generated `line
+        /// directives.
+        ///
+        /// styles:
+        ///   - "verbatim": report paths as they were passed in
+        ///     * no normalization, no symlink resolution, no conversion to
+        ///       absolute paths
+        ///   - "canonical": report canonical paths
+        ///     * normalized, symlinks resolved, absolute
+        ///   - "proximate": report all paths as relative to the current working
+        ///     directory
+        ///     * paths are canonicalized and then made relative
+        std::optional<PathStyle> diagPathStyle = PathStyle::Proximate;
 
         /// Controls whether to include hierarchy paths in printed diagnostics.
         std::optional<ShowHierarchyPathOption> diagHierarchy;

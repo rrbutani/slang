@@ -9,6 +9,7 @@
 
 #include "slang/util/FlatMap.h"
 #include "slang/util/OS.h"
+#include "slang/util/Path.h"
 #include "slang/util/String.h"
 
 namespace fs = std::filesystem;
@@ -49,9 +50,9 @@ static bool matches(std::string_view str, std::string_view pattern) {
     }
 }
 
-static void iterDirectory(const fs::path& path, SmallVector<fs::path>& results, GlobMode mode) {
+static void iterDirectory(const RawPath& path, SmallVector<RawPath>& results, GlobMode mode) {
     std::error_code ec;
-    for (auto it = fs::directory_iterator(path.empty() ? "." : path,
+    for (auto it = fs::directory_iterator((*path).empty() ? "." : *path,
                                           fs::directory_options::follow_directory_symlink |
                                               fs::directory_options::skip_permission_denied,
                                           ec);
@@ -63,38 +64,40 @@ static void iterDirectory(const fs::path& path, SmallVector<fs::path>& results, 
     }
 }
 
-static void iterDirectoriesRecursive(const fs::path& path, SmallVector<fs::path>& results,
-                                     flat_hash_set<std::string>& visited) {
-    SmallVector<fs::path> local;
+static void iterDirectoriesRecursive(RawPath&& path, SmallVector<RawPath>& results,
+                                     flat_hash_set<CanonicalPath>& visited) {
+
+    // Avoid recursing into directories we've already visited (via symlinks).
+    CanonicalPath canonical = path.asCanonical();
+    if (!visited.emplace(canonical).second) { return; }
+
+    SmallVector<RawPath> local;
     iterDirectory(path, local, GlobMode::Directories);
 
-    results.reserve(results.size() + local.size());
-    for (auto& p : local) {
-        // Avoid recursing into directories we've already visited (via symlinks).
-        std::error_code ec;
-        fs::path canonical = fs::weakly_canonical(p, ec);
-
-        if (!ec && visited.emplace(getU8Str(canonical)).second) {
-            iterDirectoriesRecursive(canonical, results, visited);
-            results.emplace_back(std::move(canonical));
-        }
+    // Use the original path instead of the canonical path for further traversal
+    // and in results — we want to preserve the path as given in case we've been
+    // instructed to report paths as is (PathStyle::verbatim).
+    for (auto&& p : local) {
+        iterDirectoriesRecursive(std::move(p), results, visited);
     }
+
+    results.emplace_back(std::move(path));
 }
 
-static void globDir(const fs::path& path, std::string_view pattern, SmallVector<fs::path>& results,
+static void globDir(const RawPath& path, std::string_view pattern, SmallVector<RawPath>& results,
                     GlobMode mode) {
-    SmallVector<fs::path> local;
+    SmallVector<RawPath> local;
     iterDirectory(path, local, mode);
 
     results.reserve(results.size() + local.size());
     for (auto&& p : local) {
-        if (matches(getU8Str(p.filename()), pattern))
+        if (matches(getU8Str((*p).filename()), pattern))
             results.emplace_back(std::move(p));
     }
 }
 
-GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, GlobMode mode,
-                        SmallVector<fs::path>& results, bool& anyWildcards) {
+GlobRank svGlobInternal(const RawPath& basePath, std::string_view pattern, GlobMode mode,
+                        SmallVector<RawPath>& results, bool& anyWildcards) {
     // Parse the pattern. Consume directories in chunks until
     // we find one that has wildcards for us to handle.
     auto currPath = basePath;
@@ -103,16 +106,15 @@ GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, Glob
         // The '...' pattern only applies at the start of a segment,
         // and means to recursively pull all directories.
         if (pattern.starts_with("..."sv)) {
-            SmallVector<fs::path> dirs;
-            flat_hash_set<std::string> visited;
-            iterDirectoriesRecursive(currPath, dirs, visited);
-            dirs.emplace_back(std::move(currPath));
+            SmallVector<RawPath> dirs;
+            flat_hash_set<CanonicalPath> visited;
+            iterDirectoriesRecursive(std::move(currPath), dirs, visited);
 
             pattern = pattern.substr(3);
 
             auto rank = GlobRank::Directory;
             for (auto& dir : dirs)
-                rank = svGlobInternal(dir, pattern, mode, results, anyWildcards);
+                rank = svGlobInternal(dir, pattern, mode, results, anyWildcards); // TODO: should we propagate `visited`?
 
             anyWildcards = true;
             return rank;
@@ -130,7 +132,7 @@ GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, Glob
                 // If this directory entry had wildcards we need to expand them
                 // and recursively search within each expanded directory.
                 if (hasWildcards) {
-                    SmallVector<fs::path> dirs;
+                    SmallVector<RawPath> dirs;
                     globDir(currPath, subPattern, dirs, GlobMode::Directories);
 
                     auto rank = GlobRank::Directory;
@@ -162,8 +164,8 @@ GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, Glob
             std::error_code ec;
             currPath /= pattern;
 
-            if ((mode == GlobMode::Files && fs::is_regular_file(currPath, ec)) ||
-                (mode == GlobMode::Directories && fs::is_directory(currPath, ec))) {
+            if ((mode == GlobMode::Files && fs::is_regular_file(*currPath, ec)) ||
+                (mode == GlobMode::Directories && fs::is_directory(*currPath, ec))) {
                 results.emplace_back(std::move(currPath));
             }
 
@@ -182,7 +184,7 @@ GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, Glob
     }
     else {
         std::error_code ec;
-        if (fs::is_directory(currPath, ec))
+        if (fs::is_directory(*currPath, ec))
             results.emplace_back(std::move(currPath));
 
         if (originalPattern.empty() ||
@@ -195,8 +197,8 @@ GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, Glob
     }
 }
 
-SLANG_EXPORT GlobRank svGlob(const fs::path& basePath, std::string_view pattern, GlobMode mode,
-                             SmallVector<fs::path>& results, bool expandEnvVars,
+SLANG_EXPORT GlobRank svGlob(const RawPath& basePath, std::string_view pattern, GlobMode mode,
+                             SmallVector<RawPath>& results, bool expandEnvVars,
                              std::error_code& ec) {
     ec.clear();
     if (pattern == "-"sv && mode == GlobMode::Files) {
@@ -226,37 +228,31 @@ SLANG_EXPORT GlobRank svGlob(const fs::path& basePath, std::string_view pattern,
         patternPath = fs::path(pattern);
     }
 
-    // Normalize the path to remove duplicate separators, figure out
-    // whether we have an absolute path, etc.
-    patternPath = patternPath.lexically_normal();
-
-    SmallVector<fs::path> local;
+    SmallVector<RawPath> local;
     GlobRank rank;
     bool anyWildcards = false;
     if (patternPath.has_root_path()) {
-        rank = svGlobInternal(patternPath.root_path(), getU8Str(patternPath.relative_path()), mode,
+        rank = svGlobInternal(RawPath(patternPath.root_path()), getU8Str(patternPath.relative_path()), mode,
                               local, anyWildcards);
     }
     else {
         rank = svGlobInternal(basePath, getU8Str(patternPath), mode, local, anyWildcards);
     }
 
-    // Results paths are always made canonical.
-    std::error_code localEc;
+    // Do not make results canonical — we want to preserve the path as given in
+    // case we've been instructed to report paths as is (PathStyle::verbatim).
     results.reserve(local.size());
-    for (auto& p : local) {
-        auto canonical = fs::weakly_canonical(p, localEc);
-        if (!localEc)
-            results.emplace_back(std::move(canonical));
+    for (auto&& p : local) {
+        results.emplace_back(std::move(p));
     }
 
     if (!anyWildcards && rank == GlobRank::SimpleName) {
         // If there were no wildcards at all and we had a simple name match,
         // promote the rank to an exact path match.
         rank = GlobRank::ExactPath;
-        if (results.empty()) {
+        if (local.empty()) {
             if (!patternPath.has_root_path())
-                patternPath = basePath / patternPath;
+                patternPath = *basePath / patternPath;
 
             auto status = fs::status(patternPath, ec);
             if (!ec) {

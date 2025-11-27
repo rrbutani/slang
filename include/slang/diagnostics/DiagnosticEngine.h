@@ -16,6 +16,7 @@
 
 #include "slang/diagnostics/Diagnostics.h"
 #include "slang/util/FlatMap.h"
+#include "slang/util/Path.h"
 #include "slang/util/TypeTraits.h"
 
 namespace slang {
@@ -297,8 +298,8 @@ private:
     flat_hash_map<DiagCode, flat_hash_map<BufferID, std::vector<DiagnosticMapping>>> diagMappings;
 
     // A list of path patterns in which to suppress warnings.
-    std::vector<std::filesystem::path> ignoreWarnPatterns;
-    std::vector<std::filesystem::path> ignoreMacroWarnPatterns;
+    std::vector<CanonicalPath> ignoreWarnPatterns;
+    std::vector<CanonicalPath> ignoreMacroWarnPatterns;
 
     // A list of all registered clients that receive issued diagnostics.
     std::vector<std::shared_ptr<DiagnosticClient>> clients;

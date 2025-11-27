@@ -1,6 +1,8 @@
 {
-  "python.testing.pytestArgs": [],
-  "python.testing.unittestEnabled": false,
-  "python.testing.pytestEnabled": true,
-  "testMate.cpp.test.workingDirectory": "${workspaceFolder}",
+    "cmake.languageSupport.dotnetPath": "/dev/null",
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "cSpell.words": [
+        "Depfile",
+        "uniquified"
+    ]
 }

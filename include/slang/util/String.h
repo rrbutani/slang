@@ -92,7 +92,7 @@ inline std::string getU8Str(const std::filesystem::path& path) {
 /// Gets a string representation of the given path, in UTF-8 encoding.
 inline const std::string& getU8Str(const std::filesystem::path& path) {
     return path.native();
-}
+} // !!! use for reporting and globs
 
 #endif
 

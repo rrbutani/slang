@@ -16,6 +16,7 @@
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/text/Glob.h"
 #include "slang/text/SourceManager.h"
+#include "slang/util/Path.h"
 #include "slang/util/SmallMap.h"
 
 namespace fs = std::filesystem;
@@ -122,18 +123,20 @@ void DiagnosticEngine::clearMappings(DiagnosticSeverity severity) {
     erase_if(severityTable, [severity](auto& pair) { return pair.second == severity; });
 }
 
+// TODO: needs relative to dir
 std::error_code DiagnosticEngine::addIgnorePaths(std::string_view pattern) {
     std::error_code ec;
-    auto p = fs::weakly_canonical(pattern, ec);
+    auto p = CanonicalPath(pattern, ec);
     if (!ec)
         ignoreWarnPatterns.emplace_back(std::move(p));
 
     return ec;
 }
 
+// TODO: needs relative to dir
 std::error_code DiagnosticEngine::addIgnoreMacroPaths(std::string_view pattern) {
     std::error_code ec;
-    auto p = fs::weakly_canonical(pattern, ec);
+    auto p = CanonicalPath(pattern, ec);
     if (!ec)
         ignoreMacroWarnPatterns.emplace_back(std::move(p));
 
@@ -217,10 +220,11 @@ bool DiagnosticEngine::issueImpl(const Diagnostic& diagnostic, DiagnosticSeverit
 
         showIncludeStack = reportedIncludeStack.emplace(loc.buffer()).second;
 
-        auto checkSuppressed = [&](const std::vector<fs::path>& patterns, SourceLocation loc) {
+        auto checkSuppressed = [&](const std::vector<CanonicalPath>& patterns, SourceLocation loc) {
             if (patterns.empty())
                 return false;
 
+            // TODO: don't canonicalize patterns? could break stuff?
             auto& path = sourceManager.getFullPath(loc.buffer());
             for (auto& pattern : patterns) {
                 if (svGlobMatches(path, pattern))

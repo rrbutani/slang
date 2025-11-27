@@ -619,7 +619,15 @@ Show or hide macro expansion backtraces in diagnostic output. The default is to 
 
 `--diag-abs-paths`
 
-Display file names as absolute paths in diagnostic output. The default is to display relative paths.
+Display file names as absolute paths in diagnostic output. Equivalent to `--diag-path-style canonical`.
+
+`--diag-path-style verbatim|canonical|proximate`
+
+Control how file names are displayed in diagnostic output, generated `line directives, and depfiles.
+'verbatim' emits paths as passed in (no normalization, resolution of symlinks, or conversion of
+relative paths to absolute). 'canonical' emits canonicalized (normalized, resolved symlinks,
+absolute) path. 'proximate' (the default) canonicalizes paths and then relativizes them to the
+current working directory.
 
 `--diag-hierarchy always|never|auto`
 
@@ -630,7 +638,7 @@ and 'never' will suppress them.
 `--diag-json <file>`
 
 Dump diagnostics in JSON format to the specified file, or '-' for stdout.
-If printing to stdout, the usual text-style diagnostics will be supressed.
+If printing to stdout, the usual text-style diagnostics will be suppressed.
 Otherwise, they will be printed like normal.
 
 `--suppress-warnings <file-pattern>[,...]`

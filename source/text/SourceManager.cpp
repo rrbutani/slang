@@ -27,6 +27,7 @@ SourceManager::SourceManager() {
     bufferEntries.emplace_back(file);
 }
 
+// TODO: needs relative to dir
 std::error_code SourceManager::addSystemDirectories(std::string_view pattern) {
     SmallVector<fs::path> dirs;
     std::error_code ec;
@@ -38,6 +39,7 @@ std::error_code SourceManager::addSystemDirectories(std::string_view pattern) {
     return ec;
 }
 
+// TODO: needs relative to dir
 std::error_code SourceManager::addUserDirectories(std::string_view pattern) {
     SmallVector<fs::path> dirs;
     std::error_code ec;
@@ -439,6 +441,7 @@ SourceManager::BufferOrError SourceManager::readHeader(
     const fs::path* currFileDir = nullptr;
     if (!disableLocalIncludes) {
         auto fileLoc = getFullyExpandedLoc(includedFrom);
+        // NOTE: never use canonicalized paths here; that's an error (may make _other_ files than intended visible)
 
         std::shared_lock<std::shared_mutex> lock(mutex);
         auto info = getFileInfo(fileLoc.buffer(), lock);
@@ -489,7 +492,7 @@ void SourceManager::addLineDirective(SourceLocation location, size_t lineNum, st
     fs::path full;
     fs::path linePath = name;
     std::error_code ec;
-    if (!disableProximatePaths && linePath.has_relative_path())
+    if (!disableProximatePaths && linePath.has_relative_path()) // !!!
         full = linePath.lexically_proximate(fs::current_path(ec));
     else
         full = fs::path(info->data->name).replace_filename(linePath);
@@ -570,7 +573,7 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
 
 bool SourceManager::isCached(const fs::path& path) const {
     fs::path absPath;
-    if (!disableProximatePaths) {
+    if (!disableProximatePaths) { // !!!
         std::error_code ec;
         absPath = fs::weakly_canonical(path, ec);
         if (ec)
@@ -590,7 +593,7 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                                                        const SourceLibrary* library,
                                                        uint64_t sortKey) {
     fs::path absPath;
-    if (!disableProximatePaths) {
+    if (!disableProximatePaths) { // !!!
         std::error_code ec;
         absPath = fs::weakly_canonical(fullPath, ec);
         if (ec)
@@ -631,7 +634,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
                                         SourceLocation includedFrom, const SourceLibrary* library,
                                         uint64_t sortKey, SmallVector<char>&& buffer) {
     std::string name;
-    if (!disableProximatePaths) {
+    if (!disableProximatePaths) { // !!!
         std::error_code ec;
         name = getU8Str(fs::proximate(path, ec));
         if (ec)
@@ -664,7 +667,7 @@ size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock)
     FileData* fd;
     {
         // Separate scope so that info isn't used after it may potentially
-        // get invalidated when we briefly unloack a read lock and grab a
+        // get invalidated when we briefly unlock a read lock and grab a
         // write lock below.
         const FileInfo* info = getFileInfo(location.buffer(), readLock);
         if (!info || !info->data)

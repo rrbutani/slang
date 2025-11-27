@@ -35,6 +35,7 @@ void SourceLoader::addBuffer(SourceBuffer buffer) {
     fileEntries.emplace_back(buffer);
 }
 
+// TODO: needs relative to dir
 void SourceLoader::addFiles(std::string_view pattern) {
     addFilesInternal(pattern, {}, /* isLibraryFile */ false, /* library */ nullptr,
                      /* unit */ nullptr,
@@ -49,12 +50,14 @@ std::vector<std::filesystem::path> SourceLoader::getFilePaths() const {
     return paths;
 }
 
+// TODO: needs relative to dir
 void SourceLoader::addLibraryFiles(std::string_view libName, std::string_view pattern) {
     addFilesInternal(pattern, {}, /* isLibraryFile */ true, getOrAddLibrary(libName),
                      /* unit */ nullptr,
                      /* expandEnvVars */ false);
 }
 
+// TODO: needs relative to dir
 void SourceLoader::addSearchDirectories(std::string_view pattern) {
     SmallVector<fs::path> directories;
     std::error_code ec;
@@ -69,7 +72,7 @@ void SourceLoader::addSearchDirectories(std::string_view pattern) {
 
 void SourceLoader::addSearchExtension(std::string_view extension) {
     if (uniqueExtensions.emplace(extension).second)
-        searchExtensions.emplace_back(extension);
+        searchExtensions.emplace_back(extension); // !!!
 }
 
 static std::string_view getPathFromSpec(const FilePathSpecSyntax& syntax) {
@@ -86,6 +89,7 @@ void SourceLoader::addLibraryMaps(std::string_view pattern, const fs::path& base
     addLibraryMapsInternal(pattern, basePath, optionBag, /* expandEnvVars */ false, seenMaps);
 }
 
+// TODO: needs relative to dir (for filePatterns, includePaths)
 void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
                                    const std::vector<std::string>& includePaths,
                                    std::vector<std::string> defines,
@@ -93,6 +97,7 @@ void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
     std::error_code ec;
     SmallVector<fs::path> includeDirs;
     for (auto& str : includePaths)
+        // TODO: thread through relative to dir here
         svGlob({}, str, GlobMode::Directories, includeDirs, /* expandEnvVars */ false, ec);
 
     auto& unit = unitEntries.emplace_back();
@@ -104,6 +109,7 @@ void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
 
     const bool isLibraryFile = unit.library != nullptr;
     for (auto& pattern : filePatterns) {
+        // TODO: thread through relative to dir here
         addFilesInternal(pattern, {}, isLibraryFile, unit.library, &unit,
                          /* expandEnvVars */ false);
     }
@@ -111,7 +117,7 @@ void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
 
 void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::path& basePath,
                                           const Bag& optionBag, bool expandEnvVars,
-                                          flat_hash_set<fs::path>& seenMaps) {
+                                          flat_hash_set<fs::path>& seenMaps) { // !!!
     SmallVector<fs::path> files;
     std::error_code ec;
     svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
@@ -432,7 +438,7 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
     std::error_code ec;
     auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
     if (ec) {
-        addError(pattern, ec);
+        addError(pattern, ec); // TODO: add basePath to error?
         return;
     }
 
@@ -447,7 +453,7 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
             // included elsewhere we should error.
             auto& entry = fileEntries[it->second];
             if (unit || entry.unit) {
-                errors.emplace_back(
+                errors.emplace_back( // TODO: maybe always report the canonical path here?
                     fmt::format("'{}': included in multiple compilation units", getU8Str(path)));
                 continue;
             }

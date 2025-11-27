@@ -18,8 +18,10 @@
 #include <variant>
 #include <vector>
 
+#include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/util/FlatMap.h"
+#include "slang/util/Path.h"
 #include "slang/util/SmallVector.h"
 #include "slang/util/Util.h"
 
@@ -181,10 +183,16 @@ public:
     /// Returns true if the given file path is already loaded and cached in the source manager.
     bool isCached(const std::filesystem::path& path) const;
 
-    /// Sets whether filenames should be made "proximate" to the current directory
-    /// for diagnostic reporting purposes. This is on by default but can be
-    /// disabled to always use the simple filename.
-    void setDisableProximatePaths(bool set) { disableProximatePaths = set; }
+    /// Sets the path style for diagnostic reporting purposes.
+    //
+    /// Defaults to `proximate`: filenames are made canonicalized and made
+    /// "proximate" to the current directory.
+    void setPathStyle(PathStyle style) { pathStyle = style; }
+    // TODO: previously disabling proximate would result in using basenames only
+    // in `FileData`; this is no longer possible with `PathStyle` (verbatim will
+    // include other path components)
+    //
+    // is this okay?
 
     /// Sets whether to disable "local" include path lookup, where include directives search
     /// relative to the file containing the directive first.
@@ -318,7 +326,7 @@ private:
     std::vector<std::variant<FileInfo, ExpansionInfo>> bufferEntries;
 
     // cache for file lookups; this holds on to the actual file data
-    flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
+    flat_hash_map<CanonicalPath, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
 
     // directories for system and user includes
     std::vector<std::filesystem::path> systemDirectories;
@@ -331,8 +339,8 @@ private:
     flat_hash_map<BufferID, std::vector<DiagnosticDirectiveInfo>> diagDirectives;
 
     std::atomic<uint32_t> unnamedBufferCount = 0;
-    bool disableProximatePaths = false;
-    bool disableLocalIncludes = false;
+    PathStyle pathStyle = PathStyle::Proximate;
+    bool disableLocalIncludes = true;
 
     template<IsLock TLock>
     FileInfo* getFileInfo(BufferID buffer, TLock& lock);

@@ -15,6 +15,7 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
+#include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/JsonDiagnosticClient.h"
 #include "slang/diagnostics/LookupDiags.h"
@@ -29,6 +30,8 @@
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/FormatBuffer.h"
 #include "slang/text/Json.h"
+#include "slang/util/CommandLine.h"
+#include "slang/util/Path.h"
 #include "slang/util/Random.h"
 #include "slang/util/String.h"
 
@@ -85,6 +88,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-I,--include-directory,+incdir",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             if (auto ec = sourceManager.addUserDirectories(value)) {
                 printWarning(fmt::format("include directory '{}': {}", value, ec.message()));
             }
@@ -95,6 +99,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--isystem",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             if (auto ec = sourceManager.addSystemDirectories(value)) {
                 printWarning(fmt::format("system include directory '{}': {}", value, ec.message()));
             }
@@ -109,7 +114,7 @@ void Driver::addStandardArgs() {
 
     // Preprocessor
     cmdLine.add("-D,--define-macro,+define", options.defines,
-                "Define <macro> to <value> (or 1 if <value> ommitted) in all source files",
+                "Define <macro> to <value> (or 1 if <value> omitted) in all source files",
                 "<macro>=<value>");
     cmdLine.add("-U,--undefine-macro", options.undefines,
                 "Undefine macro name at the start of all source files", "<macro>",
@@ -161,6 +166,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-C",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             processCommandFiles(value, /* makeRelative */ true, /* separateUnit */ true);
             return "";
         },
@@ -276,8 +282,20 @@ void Driver::addStandardArgs() {
                 "Show include stacks in diagnostic output");
     cmdLine.add("--diag-macro-expansion", options.diagMacroExpansion,
                 "Show macro expansion backtraces in diagnostic output");
-    cmdLine.add("--diag-abs-paths", options.diagAbsPaths,
-                "Display absolute paths to files in diagnostic output");
+    cmdLine.add(
+        "--diag-abs-paths",
+        [this](std::string_view) {
+            this->options.diagPathStyle = PathStyle::Canonical;
+            return "";
+        },
+        "Display absolute paths to files in diagnostic output. Equivalent to "
+        "`--diag-path-style canonical`");
+    cmdLine.addEnum<PathStyle, PathStyle_traits>(
+        "--diag-path-style", options.diagPathStyle,
+        "Control how file names are displayed in diagnostic output, `line directives, and depfiles. "
+        "'verbatim' emits paths as is, 'canonical' emits canonicalized absolute paths, and "
+        "'proximate' (default) emits canonicalized paths made _relative_ to the current "
+        "working directory");
     cmdLine.addEnum<ShowHierarchyPathOption, ShowHierarchyPathOption_traits>(
         "--diag-hierarchy", options.diagHierarchy, "Show hierarchy locations in diagnostic output",
         "always|never|auto");
@@ -292,6 +310,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--suppress-warnings",
         [this](std::string_view value) {
+            // TODO: needs relative to dir?
             if (auto ec = diagEngine.addIgnorePaths(value))
                 printWarning(fmt::format("--suppress-warnings path '{}': {}", value, ec.message()));
             return "";
@@ -302,6 +321,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--suppress-macro-warnings",
         [this](std::string_view value) {
+            // TODO: needs relative to dir?
             if (auto ec = diagEngine.addIgnoreMacroPaths(value)) {
                 printWarning(
                     fmt::format("--suppress-macro-warnings path '{}': {}", value, ec.message()));
@@ -319,6 +339,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-v,--libfile",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             addLibraryFiles(value);
             return "";
         },
@@ -329,6 +350,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--libmap",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             sourceLoader.addLibraryMaps(value, {}, createParseOptionBag());
             return "";
         },
@@ -339,6 +361,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-y,--libdir",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             sourceLoader.addSearchDirectories(value);
             return "";
         },
@@ -371,6 +394,7 @@ void Driver::addStandardArgs() {
                 }
             }
 
+            // TODO: needs relative to dir
             sourceLoader.addFiles(value);
             return "";
         },
@@ -379,6 +403,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-f",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             processCommandFiles(value, /* makeRelative */ false, /* separateUnit */ false);
             return "";
         },
@@ -389,6 +414,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-F",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             processCommandFiles(value, /* makeRelative */ true, /* separateUnit */ false);
             return "";
         },
@@ -454,23 +480,30 @@ void Driver::addStandardArgs() {
     return !anyFailedLoads;
 }
 
-bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bool separateUnit) {
-    auto onError = [this](const auto& name, std::error_code ec) {
+// TODO: needs relative to dir (for pattern)
+bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bool separateUnit) { // !!!
+    auto onErrorStr = [this](const auto& name, std::error_code ec) {
         printError(fmt::format("command file '{}': {}", name, ec.message()));
         anyFailedLoads = true;
         return false;
     };
+    auto onError = [this](const RawPath& name, std::error_code ec) {
+        // TODO: fmt path based on path style
+        printError(fmt::format("command file '{}': {}", getU8Str(*name), ec.message()));
+        anyFailedLoads = true;
+        return false;
+    };
 
-    SmallVector<fs::path> files;
+    SmallVector<RawPath> files;
     std::error_code globEc;
-    svGlob({}, pattern, GlobMode::Files, files, /* expandEnvVars */ false, globEc);
+    svGlob(RawPath::Empty, pattern, GlobMode::Files, files, /* expandEnvVars */ false, globEc);
     if (globEc)
-        return onError(pattern, globEc);
+        return onErrorStr(pattern, globEc);
 
     for (auto& path : files) {
         SmallVector<char> buffer;
-        if (auto readEc = OS::readFile(path, buffer))
-            return onError(getU8Str(path), readEc);
+        if (auto readEc = OS::readFile(*path, buffer))
+            return onError(path, readEc);
 
         if (!activeCommandFiles.insert(path).second) {
             printError(
@@ -481,7 +514,7 @@ bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bo
 
         fs::path currPath;
         std::error_code ec;
-        if (makeRelative) {
+        if (makeRelative) { // !!!
             currPath = fs::current_path(ec);
             fs::current_path(path.parent_path(), ec);
         }
@@ -500,6 +533,8 @@ bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bo
             parseOpts.ignoreProgramName = true;
             parseOpts.supportComments = true;
             parseOpts.ignoreDuplicates = true;
+            // if `makeRelative`... uh-oh. can't thread the state through, this
+            // goes everywhere!! TODO
             result = parseCommandLine(argStr, parseOpts);
         }
 
@@ -626,13 +661,17 @@ bool Driver::processOptions() {
         return false;
     }
 
+    if (!options.diagPathStyle.has_value()) {
+        options.diagPathStyle = PathStyle::Proximate; // use default if not set
+    }
+
     if (options.diagJson.has_value()) {
         jsonWriter = std::make_unique<JsonWriter>();
         jsonWriter->setPrettyPrint(true);
         jsonWriter->startArray();
 
         jsonDiagClient = std::make_shared<JsonDiagnosticClient>(*jsonWriter);
-        jsonDiagClient->showAbsPaths(options.diagAbsPaths.value_or(false));
+        jsonDiagClient->setPathStyle(options.diagPathStyle.value());
         jsonDiagClient->setColumnUnit(options.diagColumnUnit.value_or(ColumnUnit::Display));
         diagEngine.addClient(jsonDiagClient);
     }
@@ -640,13 +679,13 @@ bool Driver::processOptions() {
     auto& tdc = *textDiagClient;
     tdc.showColors(showColors);
     tdc.showColumn(options.diagColumn.value_or(true));
+    tdc.setPathStyle(options.diagPathStyle.value());
     tdc.setColumnUnit(options.diagColumnUnit.value_or(ColumnUnit::Display));
     tdc.showLocation(options.diagLocation.value_or(true));
     tdc.showSourceLine(options.diagSourceLine.value_or(true));
     tdc.showOptionName(options.diagOptionName.value_or(true));
     tdc.showIncludeStack(options.diagIncludeStack.value_or(true));
     tdc.showMacroExpansion(options.diagMacroExpansion.value_or(true));
-    tdc.showAbsPaths(options.diagAbsPaths.value_or(false));
     tdc.showHierarchyInstance(options.diagHierarchy.value_or(ShowHierarchyPathOption::Auto));
 
     diagEngine.setErrorLimit((int)options.errorLimit.value_or(20));
@@ -802,7 +841,7 @@ void Driver::reportMacros() {
     }
 }
 
-static std::string getProximatePathStr(const fs::path& path) {
+static std::string getProximatePathStr(const fs::path& path) { // !!!
     std::error_code ec;
     auto file = fs::proximate(path, ec);
     if (ec)
@@ -869,7 +908,7 @@ static std::vector<const SyntaxTree*> getSortedDependencies(
                     if (!buffers.empty()) {
                         driver.printNote(fmt::format(
                             "referenced in file '{}'",
-                            getProximatePathStr(driver.sourceManager.getFullPath(buffers[0]))));
+                            getProximatePathStr(driver.sourceManager.getFullPath(buffers[0])))); // !!!
                     }
                 }
             }
@@ -951,7 +990,7 @@ void Driver::optionallyWriteDepFiles() {
 
                 auto p = sourceManager.getFullPath(inc.buffer.id);
                 if (seenPaths.insert(p).second)
-                    includePaths.emplace_back(getProximatePathStr(p));
+                    includePaths.emplace_back(getProximatePathStr(p)); // !!!
             }
         }
 
@@ -965,7 +1004,7 @@ void Driver::optionallyWriteDepFiles() {
             for (auto bufferId : tree->getSourceBufferIds()) {
                 auto path = sourceManager.getFullPath(bufferId);
                 if (!path.empty())
-                    modulePaths.emplace_back(getProximatePathStr(path));
+                    modulePaths.emplace_back(getProximatePathStr(path)); // !!!
             }
         }
 
@@ -1221,7 +1260,7 @@ bool Driver::runFullCompilation(bool quiet) {
     return reportDiagnostics(quiet);
 }
 
-bool Driver::parseUnitListing(std::string_view text) {
+bool Driver::parseUnitListing(std::string_view text) { // TODO: needs relative to dir
     CommandLine unitCmdLine;
     std::vector<std::string> includes;
     unitCmdLine.add("-I,--include-directory,+incdir", includes, "", "",
@@ -1236,6 +1275,7 @@ bool Driver::parseUnitListing(std::string_view text) {
     unitCmdLine.add(
         "-C",
         [this](std::string_view value) {
+            // TODO: needs relative to dir
             processCommandFiles(value, /* makeRelative */ true, /* separateUnit */ true);
             return "";
         },
@@ -1268,12 +1308,14 @@ bool Driver::parseUnitListing(std::string_view text) {
         return false;
     }
 
+    // TODO: needs relative to dir
     sourceLoader.addSeparateUnit(files, includes, std::move(defines),
                                  std::move(libraryName).value_or(std::string()));
 
     return true;
 }
 
+// TODO: needs relative to dir
 void Driver::addLibraryFiles(std::string_view pattern) {
     // Parse the pattern; there's an optional leading library name
     // followed by an equals sign. If not there, we use the default
@@ -1284,6 +1326,7 @@ void Driver::addLibraryFiles(std::string_view pattern) {
         libraryName = pattern.substr(0, index);
         pattern = pattern.substr(index + 1);
     }
+    // TODO: needs relative to dir
     sourceLoader.addLibraryFiles(libraryName, pattern);
 }
 
