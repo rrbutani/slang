@@ -9,6 +9,12 @@
 
 namespace slang {
 
+const CanonicalPath CanonicalPath::Empty = CanonicalPath({});
+
 const RawPath RawPath::Empty = RawPath({});
 
-} // namespace slang::assert
+void RawPath::replace_extension(std::string_view ext) {
+    this->inner.replace_extension(ext);
+}
+
+} // namespace slang

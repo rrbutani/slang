@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <optional>
 #include "slang/ast/Compilation.h"
 #include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
@@ -18,6 +19,7 @@
 #include "slang/util/CommandLine.h"
 #include "slang/util/LanguageVersion.h"
 #include "slang/util/OS.h"
+#include "slang/util/Path.h"
 #include "slang/util/Util.h"
 
 namespace slang {
@@ -244,8 +246,19 @@ public:
         /// If true, include macro expansion information in printed diagnostics.
         std::optional<bool> diagMacroExpansion;
 
-        /// If true, display absolute paths to files in printed diagnostics.
-        std::optional<bool> diagAbsPaths;
+        /// Controls the path style used in diagnostics and in generated `line
+        /// directives.
+        ///
+        /// styles:
+        ///   - "verbatim": report paths as they were passed in
+        ///     * no normalization, no symlink resolution, no conversion to
+        ///       absolute paths
+        ///   - "canonical": report canonical paths
+        ///     * normalized, symlinks resolved, absolute
+        ///   - "proximate": report all paths as relative to the current working
+        ///     directory
+        ///     * paths are canonicalized and then made relative
+        std::optional<PathStyle> diagPathStyle = PathStyle::Proximate;
 
         /// Controls whether to include hierarchy paths in printed diagnostics.
         std::optional<ShowHierarchyPathOption> diagHierarchy;
@@ -352,7 +365,7 @@ public:
     ///                     options within it apply only to that unit and not the
     ///                     broader compilation.
     /// @returns true on success and false if errors were encountered.
-    bool processCommandFiles(std::string_view pattern, bool makeRelative, bool separateUnit);
+    bool processCommandFiles(RawPathPattern pattern, bool makeRelative, bool separateUnit);
 
     /// Processes and applies all configured options.
     /// @returns true on success and false if errors were encountered.
@@ -435,19 +448,26 @@ public:
     /// Prints a note to stderr with appropriate terminal colors.
     void printNote(const std::string& message);
 
-private:
+    std::string fmtPath(const RawPath&) const;
+
+    private:
     bool parseUnitListing(std::string_view text);
     std::string parseMapKeywordVersion(std::string_view value);
-    void addLibraryFiles(std::string_view pattern);
+    void addLibraryFiles(RawPathPattern pattern);
     void addParseOptions(Bag& bag) const;
     void addCompilationOptions(Bag& bag) const;
     bool reportLoadErrors();
 
     bool anyFailedLoads = false;
-    flat_hash_set<std::filesystem::path> activeCommandFiles;
+    flat_hash_set<CanonicalPath> activeCommandFiles;
     std::vector<std::tuple<std::string_view, std::string_view, std::string_view>>
         translateOffFormats;
     std::unique_ptr<JsonWriter> jsonWriter;
+
+    // ugly hack used to accommodate flags like `-F`, `-C` that want to
+    // interpret relative paths in command line args as being relative to a
+    // directory that's *not* PWD:
+    RawPath currentBasePath = RawPath::Empty;
 };
 
 } // namespace slang::driver

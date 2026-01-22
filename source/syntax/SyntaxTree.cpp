@@ -12,6 +12,7 @@
 #include "slang/parsing/Preprocessor.h"
 #include "slang/syntax/SyntaxPrinter.h"
 #include "slang/text/SourceManager.h"
+#include "slang/util/Path.h"
 #include "slang/util/TimeTrace.h"
 
 namespace slang::syntax {
@@ -44,7 +45,7 @@ SyntaxTree::TreeOrError SyntaxTree::fromFile(std::string_view path) {
 
 SyntaxTree::TreeOrError SyntaxTree::fromFile(std::string_view path, SourceManager& sourceManager,
                                              const Bag& options) {
-    auto buffer = sourceManager.readSource(path, /* library */ nullptr);
+    auto buffer = sourceManager.readSource(RawPath(path), /* library */ nullptr);
     if (!buffer)
         return nonstd::make_unexpected(std::pair{buffer.error(), path});
     return create(sourceManager, std::span(&buffer.value(), 1), options, {}, false);
@@ -58,7 +59,7 @@ SyntaxTree::TreeOrError SyntaxTree::fromFiles(std::span<const std::string_view> 
                                               SourceManager& sourceManager, const Bag& options) {
     SmallVector<SourceBuffer, 4> buffers(paths.size(), UninitializedTag());
     for (auto path : paths) {
-        auto buffer = sourceManager.readSource(path, /* library */ nullptr);
+        auto buffer = sourceManager.readSource(RawPath(path), /* library */ nullptr);
         if (!buffer)
             return nonstd::make_unexpected(std::pair{buffer.error(), path});
 
@@ -190,7 +191,7 @@ std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
 std::shared_ptr<SyntaxTree> SyntaxTree::fromLibraryMapFile(std::string_view path,
                                                            SourceManager& sourceManager,
                                                            const Bag& options) {
-    auto buffer = sourceManager.readSource(path, /* library */ nullptr);
+    auto buffer = sourceManager.readSource(RawPath(path), /* library */ nullptr);
     if (!buffer)
         return nullptr;
 

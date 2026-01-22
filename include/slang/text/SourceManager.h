@@ -18,8 +18,10 @@
 #include <variant>
 #include <vector>
 
+#include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/util/FlatMap.h"
+#include "slang/util/Path.h"
 #include "slang/util/SmallVector.h"
 #include "slang/util/Util.h"
 
@@ -52,14 +54,18 @@ public:
     ///
     /// @returns An error code if the given pattern is for an exact path
     /// and that path does not exist or is not a directory.
-    std::error_code addSystemDirectories(std::string_view pattern);
+    std::error_code addSystemDirectories(
+        RawPathPattern pattern, const RawPath& basePath = RawPath::Empty
+    );
 
     /// @brief Adds one or more user include directories that match
     /// the given pattern.
     ///
     /// @returns An error code if the given pattern is for an exact path
     /// and that path does not exist or is not a directory.
-    std::error_code addUserDirectories(std::string_view pattern);
+    std::error_code addUserDirectories(
+        RawPathPattern pattern, const RawPath& basePath = RawPath::Empty
+    );
 
     /// Gets the source line number for a given source location.
     size_t getLineNumber(SourceLocation location) const;
@@ -74,7 +80,10 @@ public:
     /// Gets the full path to the given source buffer. This does not take
     /// into account any `line directives. If the buffer is not a file buffer,
     /// returns an empty string.
-    const std::filesystem::path& getFullPath(BufferID buffer) const;
+    const RawPath& getFullPath(BufferID buffer) const;
+
+    /// Same as `getFullPath`, but canonicalized.
+    const CanonicalPath* getCanonFullPath(BufferID buffer) const;
 
     /// Gets the column line number for a given source location.
     /// @a location must be a file location.
@@ -170,21 +179,27 @@ public:
                               const SourceLibrary* library = nullptr);
 
     /// Read in a source file from disk.
-    BufferOrError readSource(const std::filesystem::path& path, const SourceLibrary* library,
+    BufferOrError readSource(const RawPath& path, const SourceLibrary* library,
                              uint64_t sortKey = UINT64_MAX);
 
     /// Read in a header file from disk.
-    BufferOrError readHeader(std::string_view path, SourceLocation includedFrom,
+    BufferOrError readHeader(const RawPath& path, SourceLocation includedFrom,
                              const SourceLibrary* library, bool isSystemPath,
-                             std::span<std::filesystem::path const> additionalIncludePaths);
+                             std::span<RawPath const> additionalIncludePaths);
 
     /// Returns true if the given file path is already loaded and cached in the source manager.
-    bool isCached(const std::filesystem::path& path) const;
+    bool isCached(const RawPath& path) const;
 
-    /// Sets whether filenames should be made "proximate" to the current directory
-    /// for diagnostic reporting purposes. This is on by default but can be
-    /// disabled to always use the simple filename.
-    void setDisableProximatePaths(bool set) { disableProximatePaths = set; }
+    /// Sets the path style for diagnostic reporting purposes.
+    //
+    /// Defaults to `proximate`: filenames are made canonicalized and made
+    /// "proximate" to the current directory.
+    void setPathStyle(PathStyle style) { pathStyle = style; }
+    // TODO: previously disabling proximate would result in using basenames only
+    // in `FileData`; this is no longer possible with `PathStyle` (verbatim will
+    // include other path components)
+    //
+    // is this okay?
 
     /// Sets whether to disable "local" include path lookup, where include directives search
     /// relative to the file containing the directive first.
@@ -253,16 +268,18 @@ private:
 
     // Stores actual file contents and metadata; only one per loaded file
     struct FileData {
-        const std::string name;                       // name of the file
+        const std::string name;                       // name of the file (just the basename of `fullPath`... unless proximate is enabled? TODO(proximate))
         const SmallVector<char> mem;                  // file contents
         std::vector<size_t> lineOffsets;              // cache of compute line offsets
-        const std::filesystem::path* const directory; // directory in which the file exists
-        const std::filesystem::path fullPath;         // full path to the file
+        const RawPath* const directory;               // directory in which the file exists (RawPath since its potentially used for looking up file-relative header includes)
+                                                      // equivalent to `fullPath.parent_path()`
+        const RawPath fullPath;                       // path to the file (not necessarily an abs path)
+        const CanonicalPath* canonPath;         // canonicalized version of `fullPath`
 
-        FileData(const std::filesystem::path* directory, std::string name, SmallVector<char>&& data,
-                 std::filesystem::path fullPath) :
+        FileData(const RawPath* directory, std::string name, SmallVector<char>&& data,
+                 RawPath fullPath, const CanonicalPath* canonPath) :
             name(std::move(name)), mem(std::move(data)), directory(directory),
-            fullPath(std::move(fullPath)) {}
+            fullPath(std::move(fullPath)), canonPath(canonPath) {}
     };
 
     // Stores a pointer to file data along with information about where we included it.
@@ -318,21 +335,23 @@ private:
     std::vector<std::variant<FileInfo, ExpansionInfo>> bufferEntries;
 
     // cache for file lookups; this holds on to the actual file data
-    flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
+    //
+    // note: uniquified by canonical path
+    flat_hash_map<const CanonicalPath, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
 
     // directories for system and user includes
-    std::vector<std::filesystem::path> systemDirectories;
-    std::vector<std::filesystem::path> userDirectories;
+    std::vector<RawPath> systemDirectories;
+    std::vector<RawPath> userDirectories;
 
     // uniquified backing memory for directories
-    std::set<std::filesystem::path> directories;
+    std::set<RawPath> directories;
 
     // map from buffer to diagnostic directive lists
     flat_hash_map<BufferID, std::vector<DiagnosticDirectiveInfo>> diagDirectives;
 
     std::atomic<uint32_t> unnamedBufferCount = 0;
-    bool disableProximatePaths = false;
-    bool disableLocalIncludes = false;
+    PathStyle pathStyle = PathStyle::Proximate;
+    bool disableLocalIncludes = true;
 
     template<IsLock TLock>
     FileInfo* getFileInfo(BufferID buffer, TLock& lock);
@@ -350,9 +369,9 @@ private:
                                    const SourceLibrary* library, uint64_t sortKey,
                                    std::unique_lock<std::shared_mutex>& lock);
 
-    BufferOrError openCached(const std::filesystem::path& fullPath, SourceLocation includedFrom,
+    BufferOrError openCached(const RawPath& fullPath, SourceLocation includedFrom,
                              const SourceLibrary* library, uint64_t sortKey = UINT64_MAX);
-    SourceBuffer cacheBuffer(std::filesystem::path&& path, std::string&& pathStr,
+    SourceBuffer cacheBuffer(RawPath&& path, CanonicalPath&& canonPath,
                              SourceLocation includedFrom, const SourceLibrary* library,
                              uint64_t sortKey, SmallVector<char>&& buffer);
 

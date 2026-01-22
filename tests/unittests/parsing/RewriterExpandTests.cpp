@@ -104,7 +104,7 @@ endmodule)";
     SECTION("Test expandIncludes option") {
         // Create a custom SourceManager and add include file content
         SourceManager sourceManager;
-        sourceManager.setDisableProximatePaths(true);
+        sourceManager.setPathStyle(PathStyle::Verbatim);
 
         // Add the include file content to SourceManager
         auto includeContent = R"(`define INCLUDED_MACRO 999
@@ -145,7 +145,7 @@ endmodule)";
     SECTION("Test expandIncludes disabled") {
         // Create a custom SourceManager and add include file content
         SourceManager sourceManager;
-        sourceManager.setDisableProximatePaths(true);
+        sourceManager.setPathStyle(PathStyle::Verbatim);
 
         // Add the include file content to SourceManager
         auto includeContent = R"(`define INCLUDED_MACRO 999
@@ -184,7 +184,7 @@ endmodule)";
     SECTION("Test both expandMacros and expandIncludes enabled") {
         // Create a custom SourceManager and add include file content
         SourceManager sourceManager;
-        sourceManager.setDisableProximatePaths(true);
+        sourceManager.setPathStyle(PathStyle::Verbatim);
 
         // Add the include file content to SourceManager
         auto includeContent = R"(`define INCLUDED_MACRO 777
@@ -229,7 +229,7 @@ endmodule)";
     SECTION("Test expandMacros with macro in include") {
         // Create a custom SourceManager and add include file content
         SourceManager sourceManager;
-        sourceManager.setDisableProximatePaths(true);
+        sourceManager.setPathStyle(PathStyle::Verbatim);
 
         // Add the include file content to SourceManager
         sourceManager.assignText("test_header.svh", R"(

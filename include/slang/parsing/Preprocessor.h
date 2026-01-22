@@ -16,6 +16,7 @@
 #include "slang/text/SourceLocation.h"
 #include "slang/text/SourceManager.h"
 #include "slang/util/Bag.h"
+#include "slang/util/Path.h"
 #include "slang/util/SmallMap.h"
 #include "slang/util/SmallVector.h"
 
@@ -56,13 +57,13 @@ struct SLANG_EXPORT PreprocessorOptions {
     std::vector<std::string> undefines;
 
     /// Additional include paths to use when preprocessing.
-    std::vector<std::filesystem::path> additionalIncludePaths;
+    std::vector<RawPath> additionalIncludePaths;
 
     /// A set of preprocessor directives to be ignored.
     flat_hash_set<std::string_view> ignoreDirectives;
 
     /// A list of mappings from file patterns to language keyword versions.
-    std::vector<std::pair<std::string, KeywordVersion>> keywordMapping;
+    std::vector<std::pair<RawPathPattern, KeywordVersion>> keywordMapping;
 };
 
 /// Metadata about an include directive that was invoked.

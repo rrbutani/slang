@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #include "slang/diagnostics/DiagnosticClient.h"
 
+#include <filesystem>
 #include "slang/text/SourceManager.h"
 #include "slang/util/String.h"
 
@@ -21,10 +22,29 @@ void DiagnosticClient::setEngine(const DiagnosticEngine& newEngine) {
 }
 
 std::string DiagnosticClient::getFileName(SourceLocation location) const {
-    if (absPaths)
-        return getU8Str(sourceManager->getFullPath(location.buffer()));
-    else
-        return std::string(sourceManager->getFileName(location));
+    // if (absPaths) // !!!
+    //     return getU8Str(sourceManager->getFullPath(location.buffer()));
+    // else
+    //     return std::string(sourceManager->getFileName(location));
+
+    switch (pathStyle) {
+        case PathStyle::Verbatim:
+            return sourceManager->getFullPath(location.buffer()).asU8Str();
+        case PathStyle::Canonical:
+            return sourceManager->getCanonFullPath(location.buffer())->asU8Str();
+        case PathStyle::Proximate: {
+            auto fullPath = sourceManager->getFullPath(location.buffer());
+            std::error_code ec;
+            auto proximatePath = std::filesystem::proximate(*fullPath, ec);
+            if (ec)
+                return fullPath.asU8Str();
+            else
+                return getU8Str(proximatePath);
+        }
+    }
+    SLANG_UNREACHABLE;
+
+    // TODO: steal from `Driver::fmtPath` instead?
 }
 
 void DiagnosticClient::getIncludeStack(BufferID buffer,

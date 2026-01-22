@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## [Unreleased]
 ### Language Support
 ### Notable Breaking Changes
+
+<!-- `DiagnosticClient.showAbsPaths` is gone, replaced with `DiagnosticsClient.setPathStyle` -->
+<!-- `SourceManager.setDisableProximatePaths` is gone, replaced with `SourceManager.setPathStyle` -->
+
 ### New Features
+
+<!-- todo: `--diag-path-style`, `--diag-abs-paths` remains as an alias for `--diag-path-style canonical` -->
+
 ### Improvements
 ### Fixes
 ### Tools & Bindings

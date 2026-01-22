@@ -13,6 +13,7 @@
 #include "slang/text/Glob.h"
 #include "slang/text/SourceManager.h"
 #include "slang/util/BumpAllocator.h"
+#include "slang/util/Path.h"
 #include "slang/util/ScopeGuard.h"
 #include "slang/util/String.h"
 #include "slang/util/VersionInfo.h"
@@ -595,7 +596,7 @@ Trivia Preprocessor::handleIncludeDirective(Token directive) {
         bool isSystem = path[0] == '<';
         path = path.substr(1, path.length() - 2);
 
-        auto buffer = sourceManager.readHeader(path, directive.location(), getCurrentLibrary(),
+        auto buffer = sourceManager.readHeader(RawPath(path), directive.location(), getCurrentLibrary(),
                                                isSystem, options.additionalIncludePaths);
         if (!buffer) {
             addDiag(diag::CouldNotOpenIncludeFile, fileName.range())

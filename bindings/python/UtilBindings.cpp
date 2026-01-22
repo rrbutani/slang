@@ -52,6 +52,7 @@ std::string argFormatter(const DiagnosticEngine& self, py::object obj) {
 
 void registerUtil(py::module_& m) {
     EXPOSE_ENUM(m, ColumnUnit);
+    EXPOSE_ENUM(m, PathStyle);
 
     py::classh<BumpAllocator>(m, "BumpAllocator").def(py::init<>());
 
@@ -157,6 +158,7 @@ void registerUtil(py::module_& m) {
             },
             "path"_a)
         .def("getLineNumber", &SourceManager::getLineNumber, "location"_a)
+        // todo: boil away canon path/raw path here...
         .def("getFileName", &SourceManager::getFileName, "location"_a)
         .def("getRawFileName", &SourceManager::getRawFileName, "buffer"_a)
         .def("getFullPath", &SourceManager::getFullPath, "buffer"_a)
@@ -206,7 +208,7 @@ void registerUtil(py::module_& m) {
             },
             "path"_a, "includedFrom"_a, "library"_a, "isSystemPath"_a)
         .def("isCached", &SourceManager::isCached, "path"_a)
-        .def("setDisableProximatePaths", &SourceManager::setDisableProximatePaths, "set"_a)
+        .def("setPathStyle", &SourceManager::setPathStyle, "style"_a)
         .def("setDisableLocalIncludes", &SourceManager::setDisableLocalIncludes, "set"_a)
         .def("addLineDirective", &SourceManager::addLineDirective, "location"_a, "lineNum"_a,
              "name"_a, "level"_a)
@@ -333,7 +335,7 @@ void registerUtil(py::module_& m) {
     py::classh<DiagnosticClient>(m, "DiagnosticClient")
         .def("report", &DiagnosticClient::report, "diagnostic"_a)
         .def("setEngine", &DiagnosticClient::setEngine, "engine"_a)
-        .def("showAbsPaths", &DiagnosticClient::showAbsPaths, "show"_a);
+        .def("setPathStyle", &DiagnosticClient::setPathStyle, "style"_a);
 
     py::classh<TextDiagnosticClient, DiagnosticClient>(m, "TextDiagnosticClient")
         .def(py::init<>())

@@ -3,6 +3,7 @@
 
 #include <catch2/catch_session.hpp>
 
+#include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/Diagnostics.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/SourceManager.h"
@@ -19,7 +20,7 @@ Diagnostics diagnostics;
 int main(int argc, char* argv[]) {
     slang::OS::setupConsole();
 
-    slang::syntax::SyntaxTree::getDefaultSourceManager().setDisableProximatePaths(true);
+    slang::syntax::SyntaxTree::getDefaultSourceManager().setPathStyle(slang::PathStyle::Verbatim);
 
     Catch::Session session;
     session.configData().defaultColourMode = Catch::ColourMode::ANSI;

@@ -19,6 +19,7 @@
 #include "slang/text/SourceLocation.h"
 #include "slang/util/FlatMap.h"
 #include "slang/util/Function.h"
+#include "slang/util/Path.h"
 #include "slang/util/Util.h"
 
 namespace slang {
@@ -75,7 +76,7 @@ public:
     /// All of the files that match the pattern will be added for loading.
     /// If no files match and the pattern is actually just a specific filename
     /// an error will be issued.
-    void addFiles(std::string_view pattern);
+    void addFiles(RawPathPattern pattern, const RawPath& basePath); // TODO:  = RawPath::Empty
 
     /// @brief Adds library files to be loaded, specified via the given @a pattern.
     ///
@@ -86,7 +87,7 @@ public:
     /// Library files differ from regular source files in that they are only
     /// considered "used" if referenced in the main source and their modules
     /// are not automatically instantiated.
-    void addLibraryFiles(std::string_view libraryName, std::string_view pattern);
+    void addLibraryFiles(std::string_view libraryName, RawPathPattern pattern, const RawPath& basePath); // TODO:  = RawPath::Empty
 
     /// @brief Adds directories in which to search for library module files,
     /// specified via the given @a pattern.
@@ -95,7 +96,7 @@ public:
     /// for unknown modules (or interfaces or programs). The given directories
     /// will be searched for files with the missing module's name plus any registered
     /// search extensions.
-    void addSearchDirectories(std::string_view pattern);
+    void addSearchDirectories(RawPathPattern pattern, const RawPath& basePath); // TODO:  = RawPath::Empty
 
     /// @brief Adds an extension used to search for library module files.
     ///
@@ -112,7 +113,7 @@ public:
     /// All files that match the given pattern will be loaded and parsed as if
     /// they were library map files. The libraries within those maps will be
     /// created and any files they reference will be included in the list to load.
-    void addLibraryMaps(std::string_view pattern, const std::filesystem::path& basePath,
+    void addLibraryMaps(RawPathPattern pattern, const RawPath& basePath,
                         const Bag& optionBag);
 
     /// @brief Adds a group of files as a separately compiled compilation unit.
@@ -124,9 +125,10 @@ public:
     /// If the library name is provided the compilation unit will be included
     /// in the library of that name; otherwise it will be included in the
     /// default library and be considered a non-library unit.
-    void addSeparateUnit(std::span<const std::string> filePatterns,
-                         const std::vector<std::string>& includePaths,
-                         std::vector<std::string> defines, const std::string& libraryName);
+    void addSeparateUnit(std::span<RawPathPattern> filePatterns,
+                         const std::vector<RawPathPattern>& includePaths,
+                         std::vector<std::string> defines, const std::string& libraryName,
+                         const RawPath& basePath);
 
     /// Returns a list of all library map syntax trees that have been loaded and parsed.
     const SyntaxTreeList& getLibraryMaps() const { return libraryMapTrees; }
@@ -136,7 +138,7 @@ public:
     bool hasFiles() const { return !fileEntries.empty(); }
 
     /// Returns the source paths that have been loaded.
-    std::vector<std::filesystem::path> getFilePaths() const;
+    std::vector<RawPath> getFilePaths() const;
 
     /// Loads all of the sources that have been added to the loader,
     /// but does not parse them. Returns the loaded buffers.
@@ -166,7 +168,7 @@ private:
     // One entry per unit of files + options to compile them.
     // Only used for addSeparateUnit.
     struct UnitEntry {
-        std::vector<std::filesystem::path> includePaths;
+        std::vector<RawPath> includePaths;
         std::vector<std::string> defines;
         const SourceLibrary* library = nullptr;
     };
@@ -174,7 +176,7 @@ private:
     // One entry per unique file path added to the loader.
     struct FileEntry {
         // The filesystem path (as specified by the user).
-        std::filesystem::path path;
+        RawPath path;
 
         // An optional pre-loaded buffer for when the source doesn't originate
         // from the filesystem
@@ -205,13 +207,14 @@ private:
         // eligible for automatic instantiation).
         bool isLibraryFile = false;
 
-        FileEntry(std::filesystem::path&& path, bool isLibraryFile, const SourceLibrary* library,
+        FileEntry(RawPath&& path, bool isLibraryFile, const SourceLibrary* library,
                   const UnitEntry* unit, GlobRank libraryRank) :
             path(std::move(path)), preloadedBuffer(), library(library), unit(unit),
             libraryRank(libraryRank), isLibraryFile(isLibraryFile) {}
 
         FileEntry(SourceBuffer buffer) :
-            preloadedBuffer(buffer), libraryRank(GlobRank::ExactPath) {}
+            path(RawPath::Empty), preloadedBuffer(buffer), libraryRank(GlobRank::ExactPath) {}
+            // TODO: should we attempt to get the path from the buffer?
     };
 
     // The result of a loadAndParse call.
@@ -224,26 +227,27 @@ private:
                      std::pair<const FileEntry*, std::error_code>,
                      std::pair<SourceBuffer, const UnitEntry*>>;
 
-    void addFilesInternal(std::string_view pattern, const std::filesystem::path& basePath,
+    void addFilesInternal(RawPathPattern pattern, const RawPath& basePath,
                           bool isLibraryFile, const SourceLibrary* library, const UnitEntry* unit,
                           bool expandEnvVars);
-    void addLibraryMapsInternal(std::string_view pattern, const std::filesystem::path& basePath,
+    void addLibraryMapsInternal(RawPathPattern pattern, const RawPath& basePath,
                                 const Bag& optionBag, bool expandEnvVars,
-                                flat_hash_set<std::filesystem::path>& seenMaps);
+                                flat_hash_set<CanonicalPath>& seenMaps);
     void createLibrary(const syntax::LibraryDeclarationSyntax& syntax,
-                       const std::filesystem::path& basePath);
+                       const RawPath& basePath);
     LoadResult loadAndParse(const FileEntry& fileEntry, const Bag& optionBag,
                             const SourceOptions& srcOptions, uint64_t fileSortKey = UINT64_MAX);
-    void addError(const std::filesystem::path& path, std::error_code ec);
+    void addError(const RawPath& path, std::error_code ec);
+    void addError(RawPathPattern, std::error_code ec);
 
     SourceManager& sourceManager;
 
     std::vector<FileEntry> fileEntries;
-    flat_hash_map<std::filesystem::path, size_t> fileIndex;
+    flat_hash_map<RawPath, size_t> fileIndex;
     flat_hash_map<std::string, std::unique_ptr<SourceLibrary>> libraries;
     std::deque<UnitEntry> unitEntries;
-    std::vector<std::filesystem::path> searchDirectories;
-    std::vector<std::filesystem::path> searchExtensions;
+    std::vector<RawPath> searchDirectories;
+    std::vector<std::string> searchExtensions;
     flat_hash_set<std::string_view> uniqueExtensions;
     std::vector<std::string> errors;
     SyntaxTreeList libraryMapTrees;

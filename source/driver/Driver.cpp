@@ -8,13 +8,16 @@
 //------------------------------------------------------------------------------
 #include "slang/driver/Driver.h"
 
+#include <filesystem>
 #include <fmt/color.h>
+#include <system_error>
 
 #include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/SemanticFacts.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
+#include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/JsonDiagnosticClient.h"
 #include "slang/diagnostics/LookupDiags.h"
@@ -29,8 +32,11 @@
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/FormatBuffer.h"
 #include "slang/text/Json.h"
+#include "slang/util/CommandLine.h"
+#include "slang/util/Path.h"
 #include "slang/util/Random.h"
 #include "slang/util/String.h"
+#include "slang/util/Util.h"
 
 namespace fs = std::filesystem;
 
@@ -85,7 +91,8 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-I,--include-directory,+incdir",
         [this](std::string_view value) {
-            if (auto ec = sourceManager.addUserDirectories(value)) {
+            // TODO: needs relative to dir
+            if (auto ec = sourceManager.addUserDirectories(value, this->currentBasePath)) {
                 printWarning(fmt::format("include directory '{}': {}", value, ec.message()));
             }
             return "";
@@ -95,7 +102,8 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--isystem",
         [this](std::string_view value) {
-            if (auto ec = sourceManager.addSystemDirectories(value)) {
+            // TODO: needs relative to dir
+            if (auto ec = sourceManager.addSystemDirectories(value, currentBasePath)) {
                 printWarning(fmt::format("system include directory '{}': {}", value, ec.message()));
             }
             return "";
@@ -109,7 +117,7 @@ void Driver::addStandardArgs() {
 
     // Preprocessor
     cmdLine.add("-D,--define-macro,+define", options.defines,
-                "Define <macro> to <value> (or 1 if <value> ommitted) in all source files",
+                "Define <macro> to <value> (or 1 if <value> omitted) in all source files",
                 "<macro>=<value>");
     cmdLine.add("-U,--undefine-macro", options.undefines,
                 "Undefine macro name at the start of all source files", "<macro>",
@@ -283,8 +291,21 @@ void Driver::addStandardArgs() {
                 "Show include stacks in diagnostic output");
     cmdLine.add("--diag-macro-expansion", options.diagMacroExpansion,
                 "Show macro expansion backtraces in diagnostic output");
-    cmdLine.add("--diag-abs-paths", options.diagAbsPaths,
-                "Display absolute paths to files in diagnostic output");
+    cmdLine.add(
+        "--diag-abs-paths",
+        [this](std::string_view) {
+            this->options.diagPathStyle = PathStyle::Canonical;
+            return "";
+        },
+        "Display absolute paths to files in diagnostic output. Equivalent to "
+        "`--diag-path-style canonical`");
+    cmdLine.addEnum<PathStyle, PathStyle_traits>(
+        "--diag-path-style", options.diagPathStyle,
+        "Control how file names are displayed in diagnostic output, `line directives, and "
+        "depfiles. "
+        "'verbatim' emits paths as is, 'canonical' emits canonicalized absolute paths, and "
+        "'proximate' (default) emits canonicalized paths made _relative_ to the current "
+        "working directory");
     cmdLine.addEnum<ShowHierarchyPathOption, ShowHierarchyPathOption_traits>(
         "--diag-hierarchy", options.diagHierarchy, "Show hierarchy locations in diagnostic output",
         "always|never|auto");
@@ -299,6 +320,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--suppress-warnings",
         [this](std::string_view value) {
+            // TODO: needs relative to dir?
             if (auto ec = diagEngine.addIgnorePaths(value))
                 printWarning(fmt::format("--suppress-warnings path '{}': {}", value, ec.message()));
             return "";
@@ -309,6 +331,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--suppress-macro-warnings",
         [this](std::string_view value) {
+            // TODO: needs relative to dir?
             if (auto ec = diagEngine.addIgnoreMacroPaths(value)) {
                 printWarning(
                     fmt::format("--suppress-macro-warnings path '{}': {}", value, ec.message()));
@@ -336,7 +359,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "--libmap",
         [this](std::string_view value) {
-            sourceLoader.addLibraryMaps(value, {}, createParseOptionBag());
+            sourceLoader.addLibraryMaps(value, currentBasePath, createParseOptionBag());
             return "";
         },
         "One or more library map files to parse "
@@ -346,7 +369,7 @@ void Driver::addStandardArgs() {
     cmdLine.add(
         "-y,--libdir",
         [this](std::string_view value) {
-            sourceLoader.addSearchDirectories(value);
+            sourceLoader.addSearchDirectories(value, currentBasePath);
             return "";
         },
         "Library search paths, which will be searched for missing modules", "<dir-pattern>[,...]",
@@ -378,7 +401,7 @@ void Driver::addStandardArgs() {
                 }
             }
 
-            sourceLoader.addFiles(value);
+            sourceLoader.addFiles(value, currentBasePath);
             return "";
         },
         "files");
@@ -461,36 +484,86 @@ void Driver::addStandardArgs() {
     return !anyFailedLoads;
 }
 
-bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bool separateUnit) {
-    auto onError = [this](const auto& name, std::error_code ec) {
+std::string Driver::fmtPath(const RawPath& path) const {
+    std::error_code ec;
+    bool doProx = false;
+
+    // proximate falls back to canonical falls back to verbatim
+    switch (this->options.diagPathStyle.value()) {
+        case PathStyle::Proximate:
+            doProx = true; /* fall-through */
+        case PathStyle::Canonical: {
+            auto canon = fs::weakly_canonical(*path, ec);
+            if (!ec) {
+                while (doProx) {
+                    auto pwd = fs::current_path(ec);
+                    if (!ec)
+                        break; // fall back to canonicalized
+                    auto pwdCanon = fs::weakly_canonical(pwd, ec);
+                    if (!ec)
+                        break; // fall back to canonicalized
+                    return canon.lexically_proximate(pwdCanon);
+                }
+
+                return getU8Str(canon);
+            }
+            /* fall back to emitting verbatim */
+        }
+        case PathStyle::Verbatim:
+            return getU8Str(*path);
+    }
+    SLANG_UNREACHABLE;
+}
+
+// TODO: needs relative to dir (for pattern)
+bool Driver::processCommandFiles(RawPathPattern pattern_, bool makeRelative,
+                                 bool separateUnit) {
+    auto pattern = *pattern_;
+    auto onErrorStr = [this](const auto& name, std::error_code ec) {
         printError(fmt::format("command file '{}': {}", name, ec.message()));
         anyFailedLoads = true;
         return false;
     };
+    auto onError = [this](const RawPath& name, std::error_code ec) {
+        // TODO: fmt path based on path style
+        printError(fmt::format("command file '{}': {}", fmtPath(name), ec.message()));
+        anyFailedLoads = true;
+        return false;
+    };
 
-    SmallVector<fs::path> files;
+    SmallVector<RawPath> files;
     std::error_code globEc;
-    svGlob({}, pattern, GlobMode::Files, files, /* expandEnvVars */ false, globEc);
+    svGlob(this->currentBasePath, pattern, GlobMode::Files, files, /* expandEnvVars */ false, globEc);
     if (globEc)
-        return onError(pattern, globEc);
+        return onErrorStr(pattern, globEc);
 
     for (auto& path : files) {
         SmallVector<char> buffer;
-        if (auto readEc = OS::readFile(path, buffer))
-            return onError(getU8Str(path), readEc);
+        if (auto readEc = OS::readFile(*path, buffer))
+            return onError(path, readEc);
 
-        if (!activeCommandFiles.insert(path).second) {
+        std::error_code canonicalizeEc;
+        auto canonicalPath = path.asCanonical(canonicalizeEc);
+        if (canonicalizeEc)
+            return onError(path, canonicalizeEc);
+
+        if (!activeCommandFiles.insert(canonicalPath).second) {
             printError(
-                fmt::format("command file '{}' includes itself recursively", getU8Str(path)));
+                fmt::format("command file '{}' includes itself recursively", fmtPath(path)));
             anyFailedLoads = true;
             return false;
         }
 
-        fs::path currPath;
+        RawPath prevBasePath = this->currentBasePath;
         std::error_code ec;
         if (makeRelative) {
-            currPath = fs::current_path(ec);
-            fs::current_path(path.parent_path(), ec);
+            // if we've been asked to interpret all paths as relative to this
+            // command file, update `currentBasePath` so that other arg parsing
+            // machinery interprets paths appropriately
+            this->currentBasePath = RawPath((*path).parent_path());
+
+            // after processing this command file, we'll restore
+            // `currentBasePath`
         }
 
         SLANG_ASSERT(!buffer.empty());
@@ -511,9 +584,9 @@ bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bo
         }
 
         if (makeRelative)
-            fs::current_path(currPath, ec);
+            this->currentBasePath = prevBasePath;
 
-        activeCommandFiles.erase(path);
+        activeCommandFiles.erase(canonicalPath);
 
         if (!result) {
             anyFailedLoads = true;
@@ -633,13 +706,17 @@ bool Driver::processOptions() {
         return false;
     }
 
+    if (!options.diagPathStyle.has_value()) {
+        options.diagPathStyle = PathStyle::Proximate; // use default if not set
+    }
+
     if (options.diagJson.has_value()) {
         jsonWriter = std::make_unique<JsonWriter>();
         jsonWriter->setPrettyPrint(true);
         jsonWriter->startArray();
 
         jsonDiagClient = std::make_shared<JsonDiagnosticClient>(*jsonWriter);
-        jsonDiagClient->showAbsPaths(options.diagAbsPaths.value_or(false));
+        jsonDiagClient->setPathStyle(options.diagPathStyle.value());
         jsonDiagClient->setColumnUnit(options.diagColumnUnit.value_or(ColumnUnit::Display));
         diagEngine.addClient(jsonDiagClient);
     }
@@ -647,13 +724,13 @@ bool Driver::processOptions() {
     auto& tdc = *textDiagClient;
     tdc.showColors(showColors);
     tdc.showColumn(options.diagColumn.value_or(true));
+    tdc.setPathStyle(options.diagPathStyle.value());
     tdc.setColumnUnit(options.diagColumnUnit.value_or(ColumnUnit::Display));
     tdc.showLocation(options.diagLocation.value_or(true));
     tdc.showSourceLine(options.diagSourceLine.value_or(true));
     tdc.showOptionName(options.diagOptionName.value_or(true));
     tdc.showIncludeStack(options.diagIncludeStack.value_or(true));
     tdc.showMacroExpansion(options.diagMacroExpansion.value_or(true));
-    tdc.showAbsPaths(options.diagAbsPaths.value_or(false));
     tdc.showHierarchyInstance(options.diagHierarchy.value_or(ShowHierarchyPathOption::Auto));
 
     diagEngine.setErrorLimit((int)options.errorLimit.value_or(20));
@@ -810,7 +887,7 @@ void Driver::reportMacros() {
     }
 }
 
-static std::string getProximatePathStr(const fs::path& path) {
+static std::string getProximatePathStr(const fs::path& path) { // !!!
     std::error_code ec;
     auto file = fs::proximate(path, ec);
     if (ec)
@@ -875,9 +952,10 @@ static std::vector<const SyntaxTree*> getSortedDependencies(
                 if (auto missingIt = missingToTree.find(name); missingIt != missingToTree.end()) {
                     auto buffers = missingIt->second->getSourceBufferIds();
                     if (!buffers.empty()) {
-                        driver.printNote(fmt::format(
-                            "referenced in file '{}'",
-                            getProximatePathStr(driver.sourceManager.getFullPath(buffers[0]))));
+                        driver.printNote(
+                            fmt::format("referenced in file '{}'",
+                                        driver.fmtPath(
+                                            driver.sourceManager.getFullPath(buffers[0])))); // !!! respect path style
                     }
                 }
             }
@@ -950,7 +1028,7 @@ void Driver::optionallyWriteDepFiles() {
     };
 
     std::vector<std::string> includePaths;
-    flat_hash_set<fs::path> seenPaths;
+    flat_hash_set<CanonicalPath> seenPaths;
     if (options.includeDepfile || options.allDepfile) {
         for (auto& tree : depTrees) {
             for (auto& inc : tree->getIncludeDirectives()) {
@@ -958,8 +1036,8 @@ void Driver::optionallyWriteDepFiles() {
                     continue;
 
                 auto p = sourceManager.getFullPath(inc.buffer.id);
-                if (seenPaths.insert(p).second)
-                    includePaths.emplace_back(getProximatePathStr(p));
+                if (seenPaths.insert(p.asCanonical()).second)
+                    includePaths.emplace_back(fmtPath(p));
             }
         }
 
@@ -972,8 +1050,8 @@ void Driver::optionallyWriteDepFiles() {
         for (auto& tree : depTrees) {
             for (auto bufferId : tree->getSourceBufferIds()) {
                 auto path = sourceManager.getFullPath(bufferId);
-                if (!path.empty())
-                    modulePaths.emplace_back(getProximatePathStr(path));
+                if (!(*path).empty())
+                    modulePaths.emplace_back(fmtPath(path));
             }
         }
 
@@ -1024,7 +1102,10 @@ void Driver::addParseOptions(Bag& bag) const {
     ppoptions.undefines = options.undefines;
     ppoptions.predefineSource = "<command-line>";
     ppoptions.languageVersion = languageVersion;
-    ppoptions.keywordMapping = options.keywordMapping;
+    // ppoptions.keywordMapping = options.keywordMapping;
+    ppoptions.keywordMapping.clear();
+    for (const auto& [key, value] : options.keywordMapping)
+        ppoptions.keywordMapping.emplace_back(key, value);
     if (options.maxIncludeDepth.has_value())
         ppoptions.maxIncludeDepth = *options.maxIncludeDepth;
     for (const auto& d : options.ignoreDirectives)
@@ -1254,7 +1335,7 @@ bool Driver::parseUnitListing(std::string_view text) {
         },
         "", "", CommandLineFlags::CommaList);
 
-    std::vector<std::string> files;
+    std::vector<RawPathPattern> files;
     unitCmdLine.setPositional(
         [&](std::string_view value) {
             if (!options.excludeExts.empty()) {
@@ -1264,7 +1345,7 @@ bool Driver::parseUnitListing(std::string_view text) {
                 }
             }
 
-            files.push_back(std::string(value));
+            files.push_back(value);
             return "";
         },
         "");
@@ -1281,8 +1362,14 @@ bool Driver::parseUnitListing(std::string_view text) {
         return false;
     }
 
-    sourceLoader.addSeparateUnit(files, includes, std::move(defines),
-                                 std::move(libraryName).value_or(std::string()));
+    std::vector<RawPathPattern> include_dirs;
+    for (auto& inc: includes)
+        include_dirs.push_back(RawPathPattern(inc));
+
+
+    sourceLoader.addSeparateUnit(files, include_dirs, std::move(defines),
+                                 std::move(libraryName).value_or(std::string()),
+                                this->currentBasePath);
 
     return true;
 }
@@ -1311,17 +1398,17 @@ std::string Driver::parseMapKeywordVersion(std::string_view value) {
     return "";
 }
 
-void Driver::addLibraryFiles(std::string_view pattern) {
+void Driver::addLibraryFiles(RawPathPattern pattern) {
     // Parse the pattern; there's an optional leading library name
     // followed by an equals sign. If not there, we use the default
     // library (represented by the empty string).
     std::string_view libraryName;
-    auto index = pattern.find_first_of('=');
+    auto index = (*pattern).find_first_of('=');
     if (index != std::string_view::npos) {
-        libraryName = pattern.substr(0, index);
-        pattern = pattern.substr(index + 1);
+        libraryName = (*pattern).substr(0, index);
+        pattern = (*pattern).substr(index + 1);
     }
-    sourceLoader.addLibraryFiles(libraryName, pattern);
+    sourceLoader.addLibraryFiles(libraryName, pattern, currentBasePath);
 }
 
 bool Driver::reportLoadErrors() {

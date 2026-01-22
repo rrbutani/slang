@@ -7,10 +7,8 @@
 //------------------------------------------------------------------------------
 #pragma once
 
-#include <filesystem>
-
+#include "slang/util/Path.h"
 #include "slang/util/SmallVector.h"
-#include "slang/util/Util.h"
 
 namespace slang {
 
@@ -42,6 +40,8 @@ enum class GlobMode {
     Directories
 };
 
+// TODO(docs): note that we return paths as given? (i.e. verbatim)
+
 /// @brief Performs a file system "glob" operation to find paths matching
 /// the given pattern.
 ///
@@ -61,12 +61,11 @@ enum class GlobMode {
 ///           wildcards.
 /// @returns A rank that indicates the strength of the match result.
 ///
-SLANG_EXPORT GlobRank svGlob(const std::filesystem::path& basePath, std::string_view pattern,
-                             GlobMode mode, SmallVector<std::filesystem::path>& results,
-                             bool expandEnvVars, std::error_code& ec);
+SLANG_EXPORT GlobRank svGlob(const RawPath& basePath, RawPathPattern pattern, GlobMode mode,
+                             SmallVector<RawPath>& results, bool expandEnvVars,
+                             std::error_code& ec);
 
 /// Checks whether the given path matches the supplied pattern.
-SLANG_EXPORT bool svGlobMatches(const std::filesystem::path& path,
-                                const std::filesystem::path& pattern);
+SLANG_EXPORT bool svGlobMatches(const RawPath& path, RawPathPattern pattern);
 
 } // namespace slang

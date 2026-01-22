@@ -12,6 +12,7 @@
 #include "slang/text/CharInfo.h"
 #include "slang/text/Glob.h"
 #include "slang/util/OS.h"
+#include "slang/util/Path.h"
 #include "slang/util/SmallMap.h"
 #include "slang/util/String.h"
 
@@ -27,10 +28,11 @@ SourceManager::SourceManager() {
     bufferEntries.emplace_back(file);
 }
 
-std::error_code SourceManager::addSystemDirectories(std::string_view pattern) {
-    SmallVector<fs::path> dirs;
+// TODO: needs relative to dir
+std::error_code SourceManager::addSystemDirectories(RawPathPattern pattern, const RawPath& basePath) {
+    SmallVector<RawPath> dirs;
     std::error_code ec;
-    svGlob({}, pattern, GlobMode::Directories, dirs, /* expandEnvVars */ false, ec);
+    svGlob(basePath, pattern, GlobMode::Directories, dirs, /* expandEnvVars */ false, ec);
 
     // Note: locking the separate mutex for include dirs here.
     std::unique_lock<std::shared_mutex> lock(includeDirMutex);
@@ -38,10 +40,11 @@ std::error_code SourceManager::addSystemDirectories(std::string_view pattern) {
     return ec;
 }
 
-std::error_code SourceManager::addUserDirectories(std::string_view pattern) {
-    SmallVector<fs::path> dirs;
+// TODO: needs relative to dir
+std::error_code SourceManager::addUserDirectories(RawPathPattern pattern, const RawPath& basePath) {
+    SmallVector<RawPath> dirs;
     std::error_code ec;
-    svGlob({}, pattern, GlobMode::Directories, dirs, /* expandEnvVars */ false, ec);
+    svGlob(basePath, pattern, GlobMode::Directories, dirs, /* expandEnvVars */ false, ec);
 
     // Note: locking the separate mutex for include dirs here.
     std::unique_lock<std::shared_mutex> lock(includeDirMutex);
@@ -133,6 +136,7 @@ size_t SourceManager::getDisplayColumnNumber(SourceLocation location) const {
     return displayColumn + 1; // +1 for 1-based column numbering
 }
 
+// `name`, considering `` `line `` directives
 std::string_view SourceManager::getFileName(SourceLocation location) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     SourceLocation fileLocation = getFullyExpandedLocImpl(location, lock);
@@ -152,6 +156,7 @@ std::string_view SourceManager::getFileName(SourceLocation location) const {
         return lineDirective->name;
 }
 
+// `name`
 std::string_view SourceManager::getRawFileName(BufferID buffer) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     auto info = getFileInfo(buffer, lock);
@@ -161,13 +166,23 @@ std::string_view SourceManager::getRawFileName(BufferID buffer) const {
     return info->data->name;
 }
 
-const fs::path& SourceManager::getFullPath(BufferID buffer) const {
+// `fullPath`
+const RawPath& SourceManager::getFullPath(BufferID buffer) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     auto info = getFileInfo(buffer, lock);
     if (!info || !info->data)
-        return emptyPath;
+        return RawPath::Empty;
 
     return info->data->fullPath;
+}
+
+const CanonicalPath* SourceManager::getCanonFullPath(BufferID buffer) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(buffer, lock);
+    if (!info || !info->data || !info->data->canonPath)
+        return &CanonicalPath::Empty;
+
+    return info->data->canonPath;
 }
 
 template<IsLock TLock>
@@ -389,36 +404,39 @@ SourceBuffer SourceManager::assignText(std::string_view path, std::string_view t
 SourceBuffer SourceManager::assignBuffer(std::string_view bufferPath, SmallVector<char>&& buffer,
                                          SourceLocation includedFrom,
                                          const SourceLibrary* library) {
+    // note: it's weird/fraught to treat `bufferPath` as a raw path when it may
+    // not even be a path? (i.e. `<unnamed_buffer0>`)...
+
     // first see if we have this file cached
-    fs::path path(bufferPath);
-    auto pathStr = getU8Str(path);
+    RawPath path(bufferPath);
+    auto canonPath = path.asCanonical(); // TODO: error handling
     {
         std::shared_lock<std::shared_mutex> lock(mutex);
-        auto it = lookupCache.find(pathStr);
+        auto it = lookupCache.find(canonPath);
         if (it != lookupCache.end()) {
             SLANG_THROW(std::runtime_error(
                 "Buffer with the given path has already been assigned to the source manager"));
         }
     }
 
-    return cacheBuffer(std::move(path), std::move(pathStr), includedFrom, library, UINT64_MAX,
+    return cacheBuffer(std::move(path), std::move(canonPath), includedFrom, library, UINT64_MAX,
                        std::move(buffer));
 }
 
-SourceManager::BufferOrError SourceManager::readSource(const fs::path& path,
+SourceManager::BufferOrError SourceManager::readSource(const RawPath& path,
                                                        const SourceLibrary* library,
                                                        uint64_t sortKey) {
     return openCached(path, SourceLocation(), library, sortKey);
 }
 
 SourceManager::BufferOrError SourceManager::readHeader(
-    std::string_view path, SourceLocation includedFrom, const SourceLibrary* library,
-    bool isSystemPath, std::span<std::filesystem::path const> additionalIncludePaths) {
+    const RawPath& path, SourceLocation includedFrom, const SourceLibrary* library,
+    bool isSystemPath, std::span<RawPath const> additionalIncludePaths) {
 
     // if the header is specified as an absolute path, just do a straight lookup
-    SLANG_ASSERT(!path.empty());
-    fs::path p = path;
-    if (p.is_absolute())
+    SLANG_ASSERT(!(*path).empty());
+    auto& p = path;
+    if ((*p).is_absolute())
         return openCached(p, includedFrom, library);
 
     // system path lookups only look in system directories
@@ -428,7 +446,7 @@ SourceManager::BufferOrError SourceManager::readHeader(
         // list is being modified while we're reading headers anyway.
         std::shared_lock<std::shared_mutex> includeDirLock(includeDirMutex);
         for (auto& d : systemDirectories) {
-            auto result = openCached(d / p, includedFrom, library);
+            auto result = openCached(*d / *p, includedFrom, library);
             if (result)
                 return result;
         }
@@ -436,9 +454,11 @@ SourceManager::BufferOrError SourceManager::readHeader(
     }
 
     // search relative to the current file
-    const fs::path* currFileDir = nullptr;
+    const RawPath* currFileDir = nullptr;
     if (!disableLocalIncludes) {
         auto fileLoc = getFullyExpandedLoc(includedFrom);
+        // note: we never use canonicalized paths here; that's an error (may
+        // make _other_ files than intended visible)
 
         std::shared_lock<std::shared_mutex> lock(mutex);
         auto info = getFileInfo(fileLoc.buffer(), lock);
@@ -447,13 +467,13 @@ SourceManager::BufferOrError SourceManager::readHeader(
     }
 
     if (currFileDir) {
-        auto result = openCached(*currFileDir / p, includedFrom, library);
+        auto result = openCached(**currFileDir / *p, includedFrom, library);
         if (result)
             return result;
     }
 
     for (auto& dir : additionalIncludePaths) {
-        auto result = openCached(dir / p, includedFrom, library);
+        auto result = openCached(*dir / *p, includedFrom, library);
         if (result)
             return result;
     }
@@ -461,7 +481,7 @@ SourceManager::BufferOrError SourceManager::readHeader(
     // Use library-specific include dirs if they exist.
     if (library) {
         for (auto& dir : library->includeDirs) {
-            auto result = openCached(dir / p, includedFrom, library);
+            auto result = openCached(*dir / *p, includedFrom, library);
             if (result)
                 return result;
         }
@@ -470,7 +490,7 @@ SourceManager::BufferOrError SourceManager::readHeader(
     // See comment above about this separate mutex / lock.
     std::shared_lock<std::shared_mutex> includeDirLock(includeDirMutex);
     for (auto& d : userDirectories) {
-        auto result = openCached(d / p, includedFrom, library);
+        auto result = openCached(*d / *p, includedFrom, library);
         if (result)
             return result;
     }
@@ -489,10 +509,13 @@ void SourceManager::addLineDirective(SourceLocation location, size_t lineNum, st
     fs::path full;
     fs::path linePath = name;
     std::error_code ec;
-    if (!disableProximatePaths && linePath.has_relative_path())
-        full = linePath.lexically_proximate(fs::current_path(ec));
-    else
-        full = fs::path(info->data->name).replace_filename(linePath);
+
+    // TODO(proximate)
+    // if (!disableProximatePaths && linePath.has_relative_path()) // !!!
+    //     full = linePath.lexically_proximate(fs::current_path(ec));
+    // else
+    //     full = fs::path(info->data->name).replace_filename(linePath);
+    full = fs::path(info->data->name).replace_filename(linePath);
 
     size_t sourceLineNum = getRawLineNumber(fileLocation, lock);
     info->lineDirectives.emplace_back(std::string(getU8Str(full)), sourceLineNum, lineNum, level);
@@ -568,43 +591,50 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
                         BufferID((uint32_t)(bufferEntries.size() - 1), fd->name)};
 }
 
-bool SourceManager::isCached(const fs::path& path) const {
-    fs::path absPath;
-    if (!disableProximatePaths) {
-        std::error_code ec;
-        absPath = fs::weakly_canonical(path, ec);
-        if (ec)
-            return false;
-    }
-    else {
-        absPath = path;
-    }
+bool SourceManager::isCached(const RawPath& path) const {
+    // fs::path absPath;
+    // if (!disableProximatePaths) { // !!!
+    //     std::error_code ec;
+    //     absPath = fs::weakly_canonical(path, ec);
+    //     if (ec)
+    //         return false;
+    // }
+    // else {
+    //     absPath = path;
+    // }
+    std::error_code ec;
+    auto canonPath = path.asCanonical(ec);
+    if (ec)
+        return false;
 
     std::shared_lock<std::shared_mutex> lock(mutex);
-    auto it = lookupCache.find(getU8Str(absPath));
+    auto it = lookupCache.find(canonPath);
     return it != lookupCache.end();
 }
 
-SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
+SourceManager::BufferOrError SourceManager::openCached(const RawPath& fullPath,
                                                        SourceLocation includedFrom,
                                                        const SourceLibrary* library,
                                                        uint64_t sortKey) {
-    fs::path absPath;
-    if (!disableProximatePaths) {
-        std::error_code ec;
-        absPath = fs::weakly_canonical(fullPath, ec);
-        if (ec)
-            return nonstd::make_unexpected(ec);
-    }
-    else {
-        absPath = fullPath;
-    }
+    // fs::path absPath;
+    // if (!disableProximatePaths) { // !!!
+    //     std::error_code ec;
+    //     absPath = fs::weakly_canonical(fullPath, ec);
+    //     if (ec)
+    //         return nonstd::make_unexpected(ec);
+    // }
+    // else {
+    //     absPath = fullPath;
+    // }
+    std::error_code ec;
+    auto canonPath = fullPath.asCanonical(ec);
+    if (ec)
+        return nonstd::make_unexpected(ec);
 
     // first see if we have this file cached
-    std::string pathStr = getU8Str(absPath);
     {
         std::unique_lock<std::shared_mutex> lock(mutex);
-        auto it = lookupCache.find(pathStr);
+        auto it = lookupCache.find(canonPath);
         if (it != lookupCache.end()) {
             auto& [fd, ec] = it->second;
             if (ec)
@@ -617,35 +647,38 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
 
     // do the read
     SmallVector<char> buffer;
-    if (std::error_code ec = OS::readFile(absPath, buffer)) {
+    if (std::error_code ec = OS::readFile(*canonPath, buffer)) {
         std::unique_lock<std::shared_mutex> lock(mutex);
-        lookupCache.emplace(pathStr, std::pair{nullptr, ec});
+        lookupCache.emplace(canonPath, std::pair{nullptr, ec});
         return nonstd::make_unexpected(ec);
     }
 
-    return cacheBuffer(std::move(absPath), std::move(pathStr), includedFrom, library, sortKey,
-                       std::move(buffer));
+    return cacheBuffer(RawPath(fullPath), std::move(canonPath), includedFrom, library, sortKey,
+        std::move(buffer));
 }
 
-SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
+SourceBuffer SourceManager::cacheBuffer(RawPath&& path, CanonicalPath&& canonPath,
                                         SourceLocation includedFrom, const SourceLibrary* library,
                                         uint64_t sortKey, SmallVector<char>&& buffer) {
-    std::string name;
-    if (!disableProximatePaths) {
-        std::error_code ec;
-        name = getU8Str(fs::proximate(path, ec));
-        if (ec)
-            name = {};
-    }
 
-    if (name.empty())
-        name = getU8Str(path.filename());
+    // TODO(proximate)
+    // std::string name;
+    // if (!disableProximatePaths) { // !!!
+    //     std::error_code ec;
+    //     name = getU8Str(fs::proximate(path, ec));
+    //     if (ec)
+    //         name = {};
+    // }
+    // if (name.empty())
+    //     name = getU8Str(path.filename());
+
+    std::string name = (*path).filename();
 
     std::unique_lock<std::shared_mutex> lock(mutex);
 
-    auto directory = &*directories.insert(path.parent_path()).first;
+    auto directory = &*directories.insert((*path).parent_path()).first;
     auto fd = std::make_unique<FileData>(directory, std::move(name), std::move(buffer),
-                                         std::move(path));
+                                         std::move(path), nullptr);
 
     // Note: it's possible that insertion here fails due to another thread
     // racing against us to open and insert the same file. We do a lookup
@@ -653,7 +686,8 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     // during the read. It's not actually a problem, we'll just use the data
     // we already loaded (just like we had gotten a hit on the cache in the
     // first place).
-    auto [it, inserted] = lookupCache.emplace(pathStr, std::pair{std::move(fd), std::error_code{}});
+    auto [it, inserted] = lookupCache.emplace(canonPath, std::pair{std::move(fd), std::error_code{}});
+    it->second.first->canonPath = &it->first;
 
     FileData* fdPtr = it->second.first.get();
     return createBufferEntry(fdPtr, includedFrom, library, sortKey, lock);
@@ -664,7 +698,7 @@ size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock)
     FileData* fd;
     {
         // Separate scope so that info isn't used after it may potentially
-        // get invalidated when we briefly unloack a read lock and grab a
+        // get invalidated when we briefly unlock a read lock and grab a
         // write lock below.
         const FileInfo* info = getFileInfo(location.buffer(), readLock);
         if (!info || !info->data)

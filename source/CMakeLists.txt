@@ -111,6 +111,7 @@ add_library(
   util/CommandLine.cpp
   util/IntervalMap.cpp
   util/OS.cpp
+  util/Path.cpp
   util/SmallVector.cpp
   util/String.cpp
   util/TimeTrace.cpp

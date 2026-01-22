@@ -13,6 +13,7 @@
 
 #include "slang/util/Enum.h"
 #include "slang/util/FlatMap.h"
+#include "slang/util/Path.h"
 #include "slang/util/Util.h"
 
 namespace slang {
@@ -27,7 +28,7 @@ struct SLANG_EXPORT BufferID {
     BufferID() = default;
     constexpr BufferID(uint32_t value, std::string_view name) :
 #ifdef SLANG_DEBUG
-        name(name),
+        name(name), // !!! clarify what this name is (canon path, basename, etc)
 #endif
         id(value) {
         (void)name;
@@ -183,7 +184,7 @@ struct SLANG_EXPORT SourceLibrary {
 
     /// Additional include directories that are used when
     /// parsing files that are part of this library.
-    std::vector<std::filesystem::path> includeDirs;
+    std::vector<RawPath> includeDirs;
 
     /// The priority of this library relative to others in the
     /// search order. Lower numbers are higher priority.

@@ -14,9 +14,8 @@
 #include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/SourceManager.h"
-#include "slang/util/String.h"
+#include "slang/util/Path.h"
 
-namespace fs = std::filesystem;
 
 namespace slang::driver {
 
@@ -35,30 +34,30 @@ void SourceLoader::addBuffer(SourceBuffer buffer) {
     fileEntries.emplace_back(buffer);
 }
 
-void SourceLoader::addFiles(std::string_view pattern) {
-    addFilesInternal(pattern, {}, /* isLibraryFile */ false, /* library */ nullptr,
+void SourceLoader::addFiles(RawPathPattern pattern, const RawPath& basePath) {
+    addFilesInternal(pattern, basePath, /* isLibraryFile */ false, /* library */ nullptr,
                      /* unit */ nullptr,
                      /* expandEnvVars */ false);
 }
 
-std::vector<std::filesystem::path> SourceLoader::getFilePaths() const {
-    std::vector<std::filesystem::path> paths;
+std::vector<RawPath> SourceLoader::getFilePaths() const {
+    std::vector<RawPath> paths;
     paths.reserve(fileEntries.size());
     for (const auto& entry : fileEntries)
         paths.push_back(entry.path);
     return paths;
 }
 
-void SourceLoader::addLibraryFiles(std::string_view libName, std::string_view pattern) {
-    addFilesInternal(pattern, {}, /* isLibraryFile */ true, getOrAddLibrary(libName),
+void SourceLoader::addLibraryFiles(std::string_view libName, RawPathPattern pattern, const RawPath& basePath) {
+    addFilesInternal(pattern, basePath, /* isLibraryFile */ true, getOrAddLibrary(libName),
                      /* unit */ nullptr,
                      /* expandEnvVars */ false);
 }
 
-void SourceLoader::addSearchDirectories(std::string_view pattern) {
-    SmallVector<fs::path> directories;
+void SourceLoader::addSearchDirectories(RawPathPattern pattern, const RawPath& basePath) {
+    SmallVector<RawPath> directories;
     std::error_code ec;
-    svGlob({}, pattern, GlobMode::Directories, directories, /* expandEnvVars */ false, ec);
+    svGlob(basePath, pattern, GlobMode::Directories, directories, /* expandEnvVars */ false, ec);
     if (ec) {
         addError(pattern, ec);
         return;
@@ -69,7 +68,7 @@ void SourceLoader::addSearchDirectories(std::string_view pattern) {
 
 void SourceLoader::addSearchExtension(std::string_view extension) {
     if (uniqueExtensions.emplace(extension).second)
-        searchExtensions.emplace_back(extension);
+        searchExtensions.emplace_back(extension); // !!!
 }
 
 static std::string_view getPathFromSpec(const FilePathSpecSyntax& syntax) {
@@ -80,20 +79,21 @@ static std::string_view getPathFromSpec(const FilePathSpecSyntax& syntax) {
     return path.substr(1, path.length() - 2);
 }
 
-void SourceLoader::addLibraryMaps(std::string_view pattern, const fs::path& basePath,
+void SourceLoader::addLibraryMaps(RawPathPattern pattern, const RawPath& basePath,
                                   const Bag& optionBag) {
-    flat_hash_set<fs::path> seenMaps;
+    flat_hash_set<CanonicalPath> seenMaps;
     addLibraryMapsInternal(pattern, basePath, optionBag, /* expandEnvVars */ false, seenMaps);
 }
 
-void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
-                                   const std::vector<std::string>& includePaths,
+void SourceLoader::addSeparateUnit(std::span<RawPathPattern> filePatterns,
+                                   const std::vector<RawPathPattern>& includePaths,
                                    std::vector<std::string> defines,
-                                   const std::string& libraryName) {
+                                   const std::string& libraryName,
+                                   const RawPath& basePath) {
     std::error_code ec;
-    SmallVector<fs::path> includeDirs;
+    SmallVector<RawPath> includeDirs;
     for (auto& str : includePaths)
-        svGlob({}, str, GlobMode::Directories, includeDirs, /* expandEnvVars */ false, ec);
+        svGlob(basePath, str, GlobMode::Directories, includeDirs, /* expandEnvVars */ false, ec);
 
     auto& unit = unitEntries.emplace_back();
     unit.defines = std::move(defines);
@@ -104,15 +104,15 @@ void SourceLoader::addSeparateUnit(std::span<const std::string> filePatterns,
 
     const bool isLibraryFile = unit.library != nullptr;
     for (auto& pattern : filePatterns) {
-        addFilesInternal(pattern, {}, isLibraryFile, unit.library, &unit,
+        addFilesInternal(pattern, basePath, isLibraryFile, unit.library, &unit,
                          /* expandEnvVars */ false);
     }
 }
 
-void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::path& basePath,
+void SourceLoader::addLibraryMapsInternal(RawPathPattern pattern, const RawPath& basePath,
                                           const Bag& optionBag, bool expandEnvVars,
-                                          flat_hash_set<fs::path>& seenMaps) {
-    SmallVector<fs::path> files;
+                                          flat_hash_set<CanonicalPath>& seenMaps) {
+    SmallVector<RawPath> files;
     std::error_code ec;
     svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
 
@@ -128,16 +128,21 @@ void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::pa
             continue;
         }
 
-        if (!seenMaps.insert(path).second) {
+        // note: we are deduplicating by CanonicalPath here; including the same
+        // underlying library map via different symlinks will fail
+        //
+        // TODO: is this the desired behavior?
+        auto canonPath = path.asCanonical();
+        if (!seenMaps.insert(canonPath).second) {
             errors.emplace_back(
-                fmt::format("library map '{}' includes itself recursively", getU8Str(path)));
+                fmt::format("library map '{}' includes itself recursively", path.asU8Str()));
             continue;
         }
 
         auto tree = SyntaxTree::fromLibraryMapBuffer(*buffer, sourceManager, optionBag);
         libraryMapTrees.push_back(tree);
 
-        auto parentPath = path.parent_path();
+        auto parentPath = RawPath((*path).parent_path());
         for (auto member : tree->root().as<LibraryMapSyntax>().members) {
             switch (member->kind) {
                 case SyntaxKind::ConfigDeclaration:
@@ -160,7 +165,7 @@ void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::pa
             }
         }
 
-        seenMaps.erase(path);
+        seenMaps.erase(canonPath);
     }
 }
 
@@ -186,7 +191,7 @@ std::vector<SourceBuffer> SourceLoader::loadSources() {
 
 SourceBuffer SourceLoader::findBuffer(std::string_view name) const {
     for (auto& dir : searchDirectories) {
-        fs::path path(dir);
+        RawPath path(dir);
         path /= name;
 
         for (auto& ext : searchExtensions) {
@@ -425,17 +430,19 @@ SourceLibrary* SourceLoader::getOrAddLibrary(std::string_view name) {
     return lib.get();
 }
 
-void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& basePath,
+void SourceLoader::addFilesInternal(RawPathPattern pattern, const RawPath& basePath,
                                     bool isLibraryFile, const SourceLibrary* library,
                                     const UnitEntry* unit, bool expandEnvVars) {
-    SmallVector<fs::path> files;
+    SmallVector<RawPath> files;
     std::error_code ec;
     auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
     if (ec) {
-        addError(pattern, ec);
+        addError(pattern, ec); // TODO: add basePath to error?
         return;
     }
 
+    // note: *not* deduplicating by CanonicalPath here. if users want to, i.e.,
+    // include a file in multiple libraries via symlinks they can do so.
     fileEntries.reserve(fileEntries.size() + files.size());
     for (auto&& path : files) {
         auto [it, inserted] = fileIndex.try_emplace(path, fileEntries.size());
@@ -447,8 +454,8 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
             // included elsewhere we should error.
             auto& entry = fileEntries[it->second];
             if (unit || entry.unit) {
-                errors.emplace_back(
-                    fmt::format("'{}': included in multiple compilation units", getU8Str(path)));
+                errors.emplace_back( // TODO: maybe always report the canonical path here?
+                    fmt::format("'{}': included in multiple compilation units", path.asU8Str()));
                 continue;
             }
 
@@ -474,7 +481,7 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
     }
 }
 
-void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const fs::path& basePath) {
+void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const RawPath& basePath) {
     auto libName = syntax.name.valueText();
     if (libName.empty())
         return;
@@ -492,7 +499,7 @@ void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const f
         for (auto filePath : syntax.incDirClause->filePaths) {
             auto spec = getPathFromSpec(*filePath);
             if (!spec.empty()) {
-                SmallVector<fs::path> dirs;
+                SmallVector<RawPath> dirs;
                 std::error_code ec;
                 svGlob(basePath, spec, GlobMode::Directories, dirs,
                        /* expandEnvVars */ true, ec);
@@ -549,8 +556,16 @@ SourceLoader::LoadResult SourceLoader::loadAndParse(const FileEntry& entry, cons
     }
 }
 
-void SourceLoader::addError(const std::filesystem::path& path, std::error_code ec) {
-    errors.emplace_back(fmt::format("'{}': {}", getU8Str(path), ec.message()));
+void SourceLoader::addError(const RawPath& path, std::error_code ec) {
+    errors.emplace_back(fmt::format("'{}': {}", path.asU8Str(), ec.message()));
+
+    // TODO: use `pathStyle`
+}
+
+void SourceLoader::addError(RawPathPattern pattern, std::error_code ec) {
+    errors.emplace_back(fmt::format("'{}': {}", *pattern, ec.message()));
+
+    // TODO: use `pathStyle`? not totally sure if we want to attempt to canonicalize patterns...
 }
 
 } // namespace slang::driver
