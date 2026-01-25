@@ -804,14 +804,15 @@ bool Driver::runLexer() {
     }
 
     // Only print diagnostics if actual errors occurred.
+    diagnostics.sort(sourceManager);
     for (auto& diag : diagnostics) {
         if (diag.isError()) {
-            OS::printE(fmt::format("{}", DiagnosticEngine::reportAll(sourceManager, diagnostics)));
-            return false;
+            diagEngine.issue(diag);
         }
     }
 
-    return true;
+    OS::printE(fmt::format("{}", textDiagClient->getString()));
+    return diagEngine.getNumErrors() == 0;
 }
 
 bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool obfuscateIds,
@@ -867,15 +868,15 @@ bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool 
     }
 
     // Only print diagnostics if actual errors occurred.
+    diagnostics.sort(sourceManager);
     for (auto& diag : diagnostics) {
         if (diag.isError()) {
-            OS::printE(fmt::format("{}", DiagnosticEngine::reportAll(sourceManager, diagnostics)));
-            return false;
+            diagEngine.issue(diag);
         }
     }
 
-    OS::print(fmt::format("{}\n", output.str()));
-    return true;
+    OS::printE(fmt::format("{}", textDiagClient->getString()));
+    return diagEngine.getNumErrors() == 0;
 }
 
 void Driver::reportMacros() {
