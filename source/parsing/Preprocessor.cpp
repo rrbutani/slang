@@ -479,7 +479,7 @@ Token Preprocessor::nextRaw() {
         return std::exchange(currentToken, Token());
 
     auto getNext = [&] {
-        // if we are expandeding a macro we'll have tokens from that to return
+        // if we are expanding a macro we'll have tokens from that to return
         if (currentMacroToken) {
             auto result = *currentMacroToken;
             currentMacroToken++;

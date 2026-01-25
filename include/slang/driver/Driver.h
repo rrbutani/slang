@@ -375,6 +375,13 @@ public:
     [[nodiscard]]
     analysis::AnalysisOptions getAnalysisOptions() const;
 
+    /// @brief Runs the lexer on all loaded buffers, printing any lexing errors encountered.
+    ///
+    /// On success, prints nothing.
+    ///
+    /// @returns true on success and false if errors were encountered.
+    [[nodiscard]] bool runLexer();
+
     /// @brief Runs the preprocessor on all loaded buffers and outputs the result to stdout.
     ///
     /// Any errors encountered will be printed to stderr.

@@ -96,10 +96,13 @@ int driverMain(int argc, TArgs argv) {
         driver.cmdLine.add("--version", showVersion, "Display version information and exit");
         driver.cmdLine.add("-q,--quiet", quiet, "Suppress non-essential output");
 
+        std::optional<bool> onlyLex;
         std::optional<bool> onlyPreprocess;
         std::optional<bool> onlyParse;
         std::optional<bool> onlyMacros;
         std::optional<bool> disableAnalysis;
+        driver.cmdLine.add("--lex", onlyLex,
+                           "Only run the lexer");
         driver.cmdLine.add("-E,--preprocess", onlyPreprocess,
                            "Only run the preprocessor (and print preprocessed files to stdout)");
         driver.cmdLine.add("--macros-only", onlyMacros, "Print a list of found macros and exit");
@@ -175,19 +178,19 @@ int driverMain(int argc, TArgs argv) {
         if (!driver.processOptions())
             return 2;
 
-        if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() +
+        if (onlyLex.has_value() + onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() +
                 driver.options.lintMode() >
             1) {
-            driver.printError("can only specify one of --preprocess, --macros-only, "
+            driver.printError("can only specify one of --lex, --preprocess, --macros-only, "
                               "--parse-only, --lint-only");
             return 3;
         }
 
-        if ((onlyPreprocess || onlyMacros) &&
+        if ((onlyLex || onlyPreprocess || onlyMacros) &&
             (driver.options.includeDepfile || driver.options.moduleDepfile ||
              driver.options.allDepfile)) {
             driver.printError(
-                "cannot use dependency file options with --preprocess or --macros-only");
+                "cannot use dependency file options with --lex or --preprocess or --macros-only");
             return 3;
         }
 
@@ -196,6 +199,10 @@ int driverMain(int argc, TArgs argv) {
 
         auto runStages = [&]() {
             bool ok = true;
+            if (onlyLex == true) {
+                return driver.runLexer();
+            }
+
             if (onlyPreprocess == true) {
                 return driver.runPreprocessor(includeComments == true, includeDirectives == true,
                                               obfuscateIds == true);

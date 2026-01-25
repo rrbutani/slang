@@ -93,6 +93,11 @@ Some of them are mutually exclusive. If none of these are provided,
 the default action is to elaborate the design, print any diagnostics,
 and exit.
 
+`--lex`
+
+Lex all files. Emits nothing on success, exits with an error and prints errors
+on stderr if there are lex errors.
+
 `-E,--preprocess`
 
 Treat all files as a single input file (as if `--single-unit` had been passed),

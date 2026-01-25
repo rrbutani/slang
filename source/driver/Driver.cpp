@@ -26,8 +26,10 @@
 #include "slang/diagnostics/SysFuncsDiags.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/driver/SourceLoader.h"
+#include "slang/parsing/Lexer.h"
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/Preprocessor.h"
+#include "slang/parsing/TokenKind.h"
 #include "slang/syntax/SyntaxPrinter.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/FormatBuffer.h"
@@ -784,6 +786,32 @@ static std::string generateRandomAlphaString(TGenerator& gen, size_t len) {
         return chars[getUniformIntDist(gen, size_t(0), chars.size() - 1)];
     });
     return result;
+}
+
+bool Driver::runLexer() {
+    BumpAllocator alloc;
+    Diagnostics diagnostics;
+    auto opts = createParseOptionBag();
+
+    auto buffers = sourceLoader.loadSources();
+    for (auto it = buffers.rbegin(); it != buffers.rend(); it++) {
+        Lexer lexer(*it, alloc, diagnostics, sourceManager, opts.getOrDefault<LexerOptions>());
+        while (Token tok = lexer.lex()) {
+            if (tok.kind == TokenKind::EndOfFile) {
+                break;
+            }
+        }
+    }
+
+    // Only print diagnostics if actual errors occurred.
+    for (auto& diag : diagnostics) {
+        if (diag.isError()) {
+            OS::printE(fmt::format("{}", DiagnosticEngine::reportAll(sourceManager, diagnostics)));
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool Driver::runPreprocessor(bool includeComments, bool includeDirectives, bool obfuscateIds,
