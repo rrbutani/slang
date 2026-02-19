@@ -185,6 +185,16 @@ void Driver::addStandardArgs() {
         "The files accept a subset of options that pertain specifically to parsing "
         "that unit and optionally including it in a library.",
         "<file-pattern>[,...]", CommandLineFlags::CommaList);
+    cmdLine.add(
+        "-c",
+        [this](std::string_view value) {
+            processCommandFiles(value, /* makeRelative */ false, /* separateUnit */ true);
+            return "";
+        },
+        "One or more files containing independent compilation unit listings. "
+        "Like `-C` except that paths in the file are considered relative to the "
+        "current directory instead of relative to the file itself.",
+        "<file-pattern>[,...]", CommandLineFlags::CommaList);
 
     // Compilation
     cmdLine.add("--max-hierarchy-depth", options.maxInstanceDepth,

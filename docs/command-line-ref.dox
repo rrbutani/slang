@@ -67,6 +67,12 @@ Opens the given "compilation unit listing files" containing lists of files
 and arguments used to create separate compilation units. Any file paths in
 the files are relative to the unit listing file itself.
 
+`-c <file-pattern>[,...]`
+
+Opens the given "compilation unit listing files" containing lists of files
+and arguments used to create separate compilation units. Any file paths in
+the files are relative to the current working directory.
+
 See @ref unit-listing for more information about compilation unit listings.
 
 `--exclude-ext <ext>`
