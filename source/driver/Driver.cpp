@@ -1381,6 +1381,7 @@ bool Driver::parseUnitListing(std::string_view text) {
         },
         "", "", CommandLineFlags::CommaList);
 
+    std::vector<std::string> files_owned;
     std::vector<RawPathPattern> files;
     unitCmdLine.setPositional(
         [&](std::string_view value) {
@@ -1391,7 +1392,8 @@ bool Driver::parseUnitListing(std::string_view text) {
                 }
             }
 
-            files.push_back(value);
+            files_owned.push_back(std::string(value));
+            files.push_back(std::string_view(files_owned.back()));
             return "";
         },
         "");
