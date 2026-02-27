@@ -516,6 +516,8 @@ Expression& RangeSelectExpression::fromSyntax(Compilation& comp, Expression& val
             if (checkRangeOverflow(selectionRange, context, errorRange))
                 return badExpr(comp, result);
 
+            // NOTE: if lv is `< 0`, it's interpreted as little-endian; is that
+            // right? (or should this be an outright error)
             if (selectionRange.isLittleEndian() != valueRange.isLittleEndian() &&
                 selectionRange.width() > 1) {
                 auto& diag = context.addDiag(diag::SelectEndianMismatch, errorRange);
