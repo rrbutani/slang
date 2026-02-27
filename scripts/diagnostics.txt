@@ -1212,6 +1212,9 @@ warning unknown-warning-option UnknownWarningOption "unknown warning option '{}'
 
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.
+// The default-error group is the set of warnings that are set to *error* by default.
+
+group default-error = { }
 
 group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
