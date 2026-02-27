@@ -13,6 +13,7 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/slang --diagnostics
     ${SCRIPTS_DIR}/diagnostics.txt
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/AllDiags.h
+         ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/AnalysisDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/CompilationDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/ConstEvalDiags.h
          ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/DeclarationsDiags.h
