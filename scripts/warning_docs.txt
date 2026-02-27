@@ -685,6 +685,19 @@ function string func;
 endfunction
 ```
 
+-Wselect-endian-mismatch
+```
+// errors; endianness of `inp[0:9]` doesn't match `out`
+wire [9:0] inp;
+wire [9:0] out;
+assign out = inp[0:9];
+
+// okay; endianness of `inp2[0:9]` *does* match `out`
+wire [0:9] inp2;
+wire [9:0] out2;
+assign out2 = inp2[0:9];
+```
+
 @category Misleading or Suspicious
 
 -Wunknown-escape-code

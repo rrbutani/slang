@@ -589,7 +589,7 @@ error RangeSelectAssociative "cannot take a slice of an associative array"
 error CannotIndexScalar "scalar type cannot be indexed"
 error ExprMustBeIntegral "expression type {} is not integral"
 error IndexValueInvalid "cannot refer to element {} of {}"
-error SelectEndianMismatch "endianness of selection must match declared range (type is {})"
+warning select-endian-mismatch SelectEndianMismatch "endianness of selection must match declared range (type is {})"
 error SelectEndianDynamic "range of selection [{}:{}] into {} is reversed"
 error BadAssignment "value of type {} cannot be assigned to type {}"
 error BadConversion "value of type {} cannot be converted to type {}"
@@ -1214,7 +1214,7 @@ warning unknown-warning-option UnknownWarningOption "unknown warning option '{}'
 // The default group is the set of warnings that are enabled by default.
 // The default-error group is the set of warnings that are set to *error* by default.
 
-group default-error = { value-positive }
+group default-error = { value-positive select-endian-mismatch }
 
 group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
