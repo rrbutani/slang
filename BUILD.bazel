@@ -1,0 +1,208 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+load("@rules_python//python:defs.bzl", "py_binary")
+
+# knobs:
+#   - include_tools (nah, separate targets)
+#   - include_tests (nah, separate targets)
+#   - include_docs (nah, separate targets)
+#   - include_pylib (nah, separate targets)
+#   - include_python_docs (nah, separate targets)
+#   - include_threadtest (nah, separate target)
+#   - include_uvm_test (nah, separate target)
+#
+#   - include_coverage?
+#   - ci_build?
+#   - build_shared_libs?
+#
+#   - use_threads
+#   - use_mimalloc
+#   - use_cpptrace
+#
+#   - SLANG_ASSERT_ENABLED?
+
+bool_flag(
+    name = "use_threads",
+    build_setting_default = True,
+    scope = "project",
+)
+config_setting(name = "use_threads_", flag_values = {":use_threads": "True"})
+
+bool_flag(
+    name = "use_mimalloc",
+    build_setting_default = False, # TODO: broken; want just `@mimalloc//:mimalloc-lib`
+    scope = "project",
+)
+config_setting(name = "use_mimalloc_", flag_values = {":use_mimalloc": "True"})
+
+bool_flag(
+    name = "use_cpptrace",
+    build_setting_default = False, # TODO: broken; `libdwarf` uses `cc_test` w/o import
+    scope = "project",
+)
+config_setting(name = "use_cpptrace_", flag_values = {":use_cpptrace": "True"})
+
+#-------------------------------------------------------------------------------
+
+## codegen
+
+py_binary(
+    name = "diagnostic_gen",
+    srcs = [":scripts/diagnostic_gen.py"],
+)
+py_binary(
+    name = "syntax_gen",
+    srcs = [":scripts/syntax_gen.py"],
+)
+
+# NOTE: no `doCheck` so no `--srcDir`, no `--incDir`
+diag_outs = [
+    "diag-out/slang/diagnostics/AllDiags.h",
+    "diag-out/slang/diagnostics/AnalysisDiags.h",
+    "diag-out/slang/diagnostics/CompilationDiags.h",
+    "diag-out/slang/diagnostics/ConstEvalDiags.h",
+    "diag-out/slang/diagnostics/DeclarationsDiags.h",
+    "diag-out/slang/diagnostics/ExpressionsDiags.h",
+    "diag-out/slang/diagnostics/GeneralDiags.h",
+    "diag-out/slang/diagnostics/LexerDiags.h",
+    "diag-out/slang/diagnostics/LookupDiags.h",
+    "diag-out/slang/diagnostics/MetaDiags.h",
+    "diag-out/slang/diagnostics/NumericDiags.h",
+    "diag-out/slang/diagnostics/ParserDiags.h",
+    "diag-out/slang/diagnostics/PreprocessorDiags.h",
+    "diag-out/slang/diagnostics/StatementsDiags.h",
+    "diag-out/slang/diagnostics/SysFuncsDiags.h",
+    "diag-out/slang/diagnostics/TypesDiags.h",
+    "diag-out/DiagCode.cpp",
+]
+genrule(
+    name = "generate_diagnostics",
+    outs = diag_outs,
+    tools = [":diagnostic_gen"],
+    srcs = [
+        ":scripts/diagnostics.txt",
+    ],
+    cmd = ' '.join([
+        "$(location :diagnostic_gen)",
+        "--diagnostics $(location :scripts/diagnostics.txt)",
+        "--outDir $(RULEDIR)/diag-out",
+    ]),
+)
+
+syntax_outs = [
+    "syn-out/slang/syntax/AllSyntax.h",
+    "syn-out/AllSyntax.cpp",
+    "syn-out/SyntaxClone.cpp",
+    "syn-out/slang/syntax/SyntaxKind.h",
+    "syn-out/slang/syntax/SyntaxFwd.h",
+    "syn-out/slang/syntax/CSTJsonVisitorGen.h",
+    "syn-out/slang/parsing/TokenKind.h",
+    "syn-out/slang/parsing/KnownSystemName.h",
+    "syn-out/TokenKind.cpp",
+    "syn-out/KnownSystemName.cpp",
+]
+genrule(
+    name = "generate_syntax",
+    outs = syntax_outs,
+    tools = [":syntax_gen"],
+    srcs = [
+        ":scripts/syntax.txt",
+        ":scripts/triviakinds.txt",
+        ":scripts/tokenkinds.txt",
+        ":scripts/systemnames.txt",
+    ],
+    cmd = ' '.join([
+        "$(location :syntax_gen)",
+        "--syntax $(location :scripts/syntax.txt)",
+        "--dir $(RULEDIR)/syn-out",
+    ]),
+)
+
+# slang_export.h
+genrule(
+    name = "generate_slang_export",
+    outs = ["include/slang/slang_export.h"],
+    cmd = "{ " + '; '.join([
+        "echo '#pragma once'",
+        "echo '#define SLANG_EXPORT'",
+    ]) + '; } > $(OUTS)',
+)
+
+v_maj, v_min, v_patch = module_version().split('.')[:3]
+expand_template(
+    name = "generate_version_info",
+    template = ":source/util/VersionInfo.cpp.in",
+    out = "VersionInfo.cpp",
+    substitutions = {
+        "@SLANG_VERSION_MAJOR@": v_maj,
+        "@SLANG_VERSION_MINOR@": v_min,
+        "@SLANG_VERSION_PATCH@": v_patch,
+        "@SLANG_VERSION_HASH@": "null", # TODO: get from stamp file?
+    },
+)
+
+#-------------------------------------------------------------------------------
+
+## libraries
+
+cc_library(
+    name = "slang_lib",
+    srcs = [
+        ":VersionInfo.cpp",
+    ] + diag_outs + syntax_outs + glob([
+        "source/**/*.cpp",
+        "source/**/*.h",
+    ]),
+    hdrs = [
+        ":include/slang/slang_export.h",
+    ] + glob([
+        "include/**/*.h",
+        "ext/ieee1800/*.h",
+    ]),
+    local_defines = select({
+        ":use_threads_": ["SLANG_USE_THREADS"],
+        "//conditions:default": [],
+    }) + select({
+        ":use_mimalloc_": ["SLANG_USE_MIMALLOC"],
+        "//conditions:default": [],
+    }) + select({
+        ":use_cpptrace_": ["SLANG_USE_CPPTRACE"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "@fmt", "@boost.unordered", "@expected-lite", "@bs_thread_pool"
+    ] + select({
+        ":use_mimalloc_": ["@mimalloc"],
+        "//conditions:default": [],
+    }) + select({
+        ":use_cpptrace_": ["@cpptrace"],
+        "//conditions:default": [],
+    }),
+    copts = ["-std=c++20"],
+    includes = ["include", "diag-out", "syn-out", "ext"],
+    visibility = ["//visibility:public"],
+)
+
+#-------------------------------------------------------------------------------
+
+## tools
+
+cc_binary(
+    name = "slang",
+    srcs = [":tools/driver/slang_main.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":slang_lib"],
+    visibility = ["//visibility:public"],
+)
+
+# TODO: hier, reflect, rewriter, tidy
+
+#-------------------------------------------------------------------------------
+
+# TODO: model pylib, python_docs targets
+
+# TODO(future): support compiling for wasi
+
+# TODO: model tests? (ctest? or directly here)
+#   - TODO: `threadtest`

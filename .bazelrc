@@ -1,0 +1,87 @@
+# Resources:
+#  - https://bazel.build/run/bazelrc
+#  - https://blog.aspect.dev/bazelrc-flags
+#  - https://docs.aspect.build/guides/bazelrc/
+#  - https://bazel.build/versions/9.0.0/reference/command-line-reference
+
+################################################################################
+
+## Build:
+
+## Test:
+common --run_validations=true
+common --experimental_use_validation_aspect=true # run validation actions in parallel with tests
+
+common --test_verbose_timeout_warnings
+common --test_output=errors # show full logs for failing tests
+common --verbose_test_summary=true # show timing info
+
+################################################################################
+
+## Misc (Starlark APIs, config, internal details):
+
+# Auto applies `build:linux`, `build:macos` etc. in `.bazelrc` files:
+common --enable_platform_specific_config
+
+common --incompatible_auto_exec_groups=true
+
+################################################################################
+
+## Sandboxing:
+# https://bazel.build/docs/sandboxing
+
+# Reset `PATH` for actions:
+build --incompatible_strict_action_env=true
+
+# disallow `local`
+#
+# while we don't specify `linux-sandbox`/`darwin-sandbox` explicitly here we
+# expect that Bazel will use it when possible (i.e. unless the user is in a
+# container, etc.)
+build --spawn_strategy=remote,worker,sandboxed
+
+# Stricter sandboxing options: no network access, sanitized host/user name:
+common --sandbox_default_allow_network=false
+common --sandbox_fake_hostname=true
+common --sandbox_fake_username=true
+common --worker_sandboxing=true
+
+################################################################################
+
+common:path_mapping --experimental_output_paths=strip
+
+common:no_path_mapping --experimental_output_paths=off
+
+################################################################################
+
+## Logging/Debug/Reporting:
+common --attempt_to_print_relative_paths=true
+
+################################################################################
+
+## C/C++:
+
+# features; see: https://bazel.build/docs/cc-toolchain-config-reference#features
+common --features=thin_lto
+common --features=parse_headers
+common --features=layering_check
+
+common:path_mapping --modify_execution_info=CppCompile=+supports-path-mapping
+common:path_mapping --modify_execution_info=CppModuleMap=+supports-path-mapping
+common:path_mapping --modify_execution_info=CppArchive=+supports-path-mapping
+
+################################################################################
+
+## Misc:
+common --config=path_mapping
+
+# `bazel_lib`'s `run_binary` forms command lines (analysis) using unmapped paths
+common --modify_execution_info=RunBinary=-supports-path-mapping
+# `libcxx_headers_include_search_directory` cannot be path mapped (json file has
+# unmapped paths)... for now disable path mapping all CopyDirectory actions
+common --modify_execution_info=CopyToDirectory=-supports-path-mapping
+
+################################################################################
+
+## User config:
+try-import %workspace%/.user.bazelrc
