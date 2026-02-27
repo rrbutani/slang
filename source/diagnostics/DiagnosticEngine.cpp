@@ -498,6 +498,10 @@ Diagnostics DiagnosticEngine::setWarningOptions(std::span<const std::string> opt
     flat_hash_map<DiagCode, bool> codeErrors;
     bool includeDefault = true;
 
+    auto default_error_group = findDiagGroup("default-error"sv);
+    SLANG_ASSERT(default_error_group);
+    groupErrors[default_error_group] = true;
+
     auto findAndSet = [&](std::string_view name, bool set, const char* errorPrefix,
                           bool isExplicitError) {
         if (auto group = findDiagGroup(name)) {
@@ -577,6 +581,8 @@ Diagnostics DiagnosticEngine::setWarningOptions(std::span<const std::string> opt
         auto group = findDiagGroup("default"sv);
         SLANG_ASSERT(group);
         handleGroup(group, true);
+
+        handleGroup(default_error_group, true);
     }
 
     // Apply all of the collected settings to the severity table.
