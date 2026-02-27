@@ -305,6 +305,13 @@ module m(a);
 endmodule
 ```
 
+-Wmultiple-cont-assigns
+```
+logic [0:3] o;
+assign o[0:2] = 3'b111;
+assign o[2:3] = 2'b11;  // error; o[2:2] is assigned to twice
+```
+
 @category Case Statements
 
 -Wcase-gen-dup
