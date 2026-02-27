@@ -49,7 +49,7 @@ error LiteralSizeIsZero "size of vector literal cannot be zero"
 error LiteralSizeTooLarge "size of vector literal is too large (> {} bits)"
 error ValueMustBeIntegral "value must be integral"
 error ValueMustNotBeUnknown "value must not have any unknown bits"
-error ValueMustBePositive "value must be positive"
+warning value-positive ValueMustBePositive "value must be positive"
 error ValueExceedsMaxBitWidth "value exceeds maximum vector width ({} bits)"
 error ValueOutOfRange "{} is out of allowed range ({} to {})"
 error ExpectedVectorDigits "expected vector literal digits"
@@ -1214,7 +1214,7 @@ warning unknown-warning-option UnknownWarningOption "unknown warning option '{}'
 // The default group is the set of warnings that are enabled by default.
 // The default-error group is the set of warnings that are set to *error* by default.
 
-group default-error = { }
+group default-error = { value-positive }
 
 group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
