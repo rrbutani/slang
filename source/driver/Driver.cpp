@@ -1366,6 +1366,14 @@ bool Driver::parseUnitListing(std::string_view text) {
     std::optional<std::string> libraryName;
     unitCmdLine.add("--library", libraryName, "");
 
+    // TODO: docs
+    // TODO: check that the global `singleUnit` implies this option
+    // TODO: check that this is set if `librariesInheritMacros` is set?
+    std::optional<bool> singleUnit;
+    unitCmdLine.add("--single-unit", singleUnit,
+        "Compile all files in the compilation unit listing as a single unit. Defaults to true"
+    );
+
     unitCmdLine.add(
         "-C",
         [this](std::string_view value) {
@@ -1418,7 +1426,8 @@ bool Driver::parseUnitListing(std::string_view text) {
 
     sourceLoader.addSeparateUnit(files, include_dirs, std::move(defines),
                                  std::move(libraryName).value_or(std::string()),
-                                this->currentBasePath);
+                                 singleUnit.value_or(true),
+                                 this->currentBasePath);
 
     return true;
 }

@@ -89,6 +89,7 @@ void SourceLoader::addSeparateUnit(std::span<RawPathPattern> filePatterns,
                                    const std::vector<RawPathPattern>& includePaths,
                                    std::vector<std::string> defines,
                                    const std::string& libraryName,
+                                   bool compileAsSingleUnit,
                                    const RawPath& basePath) {
     std::error_code ec;
     SmallVector<RawPath> includeDirs;
@@ -98,6 +99,7 @@ void SourceLoader::addSeparateUnit(std::span<RawPathPattern> filePatterns,
     auto& unit = unitEntries.emplace_back();
     unit.defines = std::move(defines);
     unit.library = getOrAddLibrary(libraryName);
+    unit.compileAsSingleUnit = compileAsSingleUnit;
 
     for (auto&& path : includeDirs)
         unit.includePaths.emplace_back(std::move(path));
@@ -289,7 +291,8 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
         loadResults.resize(fileEntries.size());
 
         // Load all source files that were specified on the command line
-        // or via library maps.
+        // or via library maps or in compilation units marked for *not* being
+        // compiled as a single unit.
         threadPool.detach_loop(size_t(0), fileEntries.size(), [&](size_t i) {
             loadResults[i] = loadAndParse(fileEntries[i], optionBag, srcOptions, i);
         });
@@ -333,7 +336,8 @@ SourceLoader::SyntaxTreeList SourceLoader::loadAndParseSources(const Bag& option
     }
     else {
         // Load all source files that were specified on the command line
-        // or via library maps.
+        // or via library maps or in compilation units marked for *not* being
+        // compiled as a single unit.
         for (auto& entry : fileEntries)
             handleLoadResult(loadAndParse(entry, optionBag, srcOptions));
 
@@ -531,7 +535,7 @@ SourceLoader::LoadResult SourceLoader::loadAndParse(const FileEntry& entry, cons
     if (!buffer)
         return std::pair{&entry, buffer.error()};
 
-    if (entry.unit) {
+    if (entry.unit && entry.unit->compileAsSingleUnit) {
         return std::pair{*buffer, entry.unit};
     }
     else if (!entry.isLibraryFile && srcOptions.singleUnit) {
@@ -548,11 +552,38 @@ SourceLoader::LoadResult SourceLoader::loadAndParse(const FileEntry& entry, cons
     }
     else {
         // Otherwise we can parse right away.
-        auto tree = SyntaxTree::fromBuffer(*buffer, sourceManager, optionBag);
-        if (entry.isLibraryFile || srcOptions.onlyLint)
-            tree->isLibraryUnit = true;
+        if (entry.unit) {
+            SLANG_ASSERT(!entry.unit->compileAsSingleUnit);
+            // for files in compilation units that were marked such that the
+            // compilation unit is not compiled as a single unit:
 
-        return tree;
+            // TODO: cache; produce these options once per unit?
+            auto opts = optionBag;
+            auto& ppOpts = opts.insertOrGet<parsing::PreprocessorOptions>();
+            ppOpts.predefines.insert(
+                ppOpts.predefines.end(),
+                entry.unit->defines.begin(),
+                entry.unit->defines.end()
+            );
+            ppOpts.additionalIncludePaths.insert(
+                ppOpts.additionalIncludePaths.end(),
+                entry.unit->includePaths.begin(),
+                entry.unit->includePaths.end()
+            );
+
+            auto tree = SyntaxTree::fromBuffer(*buffer, sourceManager, opts);
+            tree->isLibraryUnit = (
+                srcOptions.onlyLint || entry.unit->library != nullptr
+            );
+
+            return tree;
+        } else {
+            auto tree = SyntaxTree::fromBuffer(*buffer, sourceManager, optionBag);
+            if (entry.isLibraryFile || srcOptions.onlyLint)
+                tree->isLibraryUnit = true;
+
+            return tree;
+        }
     }
 }
 

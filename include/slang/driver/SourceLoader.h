@@ -128,6 +128,7 @@ public:
     void addSeparateUnit(std::span<RawPathPattern> filePatterns,
                          const std::vector<RawPathPattern>& includePaths,
                          std::vector<std::string> defines, const std::string& libraryName,
+                         bool compileAsSingleUnit,
                          const RawPath& basePath);
 
     /// Returns a list of all library map syntax trees that have been loaded and parsed.
@@ -170,6 +171,7 @@ private:
     struct UnitEntry {
         std::vector<RawPath> includePaths;
         std::vector<std::string> defines;
+        bool compileAsSingleUnit = true;
         const SourceLibrary* library = nullptr;
     };
 
