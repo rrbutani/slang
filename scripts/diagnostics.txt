@@ -89,7 +89,7 @@ error ExpectedMacroStringifyEnd "expected closing quote to end macro stringifica
 error ExpectedMacroCommentEnd "expected closing '*/' to end macro concatenated comment"
 error ExpectedPragmaName "expected pragma name"
 error ExpectedPragmaExpression "expected pragma expression"
-error DirectiveInsideDesignElement "directive is not allowed inside a design element"
+warning directive-inside-design-element DirectiveInsideDesignElement "directive is not allowed inside a design element"
 error MacroTokensAfterPragmaProtect "unexpected macro expansion after pragma protect directive"
 note NoteDirectiveHere "after protect directive here"
 warning ignored-macro-paste IgnoredMacroPaste "paste token is pointless because it is adjacent to whitespace"
@@ -1214,7 +1214,8 @@ warning unknown-warning-option UnknownWarningOption "unknown warning option '{}'
 // The default group is the set of warnings that are enabled by default.
 // The default-error group is the set of warnings that are set to *error* by default.
 
-group default-error = { value-positive select-endian-mismatch multiple-cont-assigns }
+group default-error = { value-positive select-endian-mismatch multiple-cont-assigns
+                        directive-inside-design-element }
 
 group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option

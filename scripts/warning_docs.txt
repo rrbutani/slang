@@ -1074,6 +1074,15 @@ module m(input clk, a, b);
 endmodule
 ```
 
+-Wdirective-inside-design-element
+```
+module foo();
+
+`default_nettype none
+
+endmodule
+```
+
 @category Compatibility
 
 -Wdpi-spec
