@@ -1074,6 +1074,11 @@ module m(input clk, a, b);
 endmodule
 ```
 
+-Wformat-specifier-width-not-allowed
+```
+$display("%0m"); // format width not relevant here
+```
+
 -Wdirective-inside-design-element
 ```
 module foo();
