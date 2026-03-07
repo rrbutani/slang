@@ -924,7 +924,7 @@ error TypeRefVoid "cannot create a type reference to the 'void' type"
 warning enum-range EnumRangeLiteral "enum element ranges must be integer literals"
 
 subsystem Lookup
-error Redefinition "redefinition of '{}'"
+warning redefinition Redefinition "redefinition of '{}'"
 error RedefinitionDifferentType "redefinition of '{}' with a different type: {} vs {}"
 error AmbiguousWildcardImport "multiple imports found for identifier '{}'"
 note NoteImportedFrom "imported from here"
@@ -1216,7 +1216,7 @@ warning unknown-warning-option UnknownWarningOption "unknown warning option '{}'
 
 group default-error = { value-positive select-endian-mismatch multiple-cont-assigns
                         format-specifier-width-not-allowed directive-inside-design-element
-                        error-task }
+                        error-task redefinition }
 
 group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option

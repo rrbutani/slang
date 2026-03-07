@@ -1321,6 +1321,11 @@ endmodule
 $error("..."); // if `-Wno-error-task` is set, will be suppressed
 ```
 
+-Wredefinition
+```
+// TODO
+```
+
 @category Macros
 
 -Wignored-macro-paste
