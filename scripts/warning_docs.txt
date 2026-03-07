@@ -1316,6 +1316,11 @@ module m;
 endmodule
 ```
 
+-Werror-task
+```
+$error("..."); // if `-Wno-error-task` is set, will be suppressed
+```
+
 @category Macros
 
 -Wignored-macro-paste
