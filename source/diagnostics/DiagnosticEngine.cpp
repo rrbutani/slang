@@ -247,7 +247,7 @@ bool DiagnosticEngine::issueImpl(const Diagnostic& diagnostic, DiagnosticSeverit
             return false;
         };
 
-        if (getDefaultSeverity(diagnostic.code) == DiagnosticSeverity::Warning) {
+        if (getDefaultSeverity(diagnostic.code) <= DiagnosticSeverity::Warning) {
             if (checkSuppressed(ignoreWarnPatterns, loc))
                 return false;
 
