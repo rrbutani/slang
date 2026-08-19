@@ -1,7 +1,9 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
-load("@rules_python//python:defs.bzl", "py_binary")
+load("@aspect_rules_py//py:defs.bzl", "py_binary")
 
 # knobs:
 #   - include_tools (nah, separate targets)
@@ -56,6 +58,9 @@ py_binary(
     srcs = [":scripts/syntax_gen.py"],
 )
 
+write_file(name = "path_marker1", out = "diag-", content = [])
+write_file(name = "path_marker2", out = "syn-", content = [])
+
 # NOTE: no `doCheck` so no `--srcDir`, no `--incDir`
 diag_outs = [
     "diag-out/slang/diagnostics/AllDiags.h",
@@ -76,18 +81,24 @@ diag_outs = [
     "diag-out/slang/diagnostics/TypesDiags.h",
     "diag-out/DiagCode.cpp",
 ]
-genrule(
+run_binary(
     name = "generate_diagnostics",
     outs = diag_outs,
-    tools = [":diagnostic_gen"],
+    tool = ":diagnostic_gen",
     srcs = [
         ":scripts/diagnostics.txt",
+        ":diag-", # HACK: see below
     ],
-    cmd = ' '.join([
-        "$(location :diagnostic_gen)",
-        "--diagnostics $(location :scripts/diagnostics.txt)",
-        "--outDir $(RULEDIR)/diag-out",
-    ]),
+    args = [
+        "--diagnostics", "$(location :scripts/diagnostics.txt)",
+        # NOTE: we want `$(dirname $(location ...))
+        #   - see: https://github.com/bazelbuild/bazel/pull/26236
+        #   - `$(RULEDIR)` is expanded in `genrule`s but not location expansion
+        #
+        # instead we do an (awful) workaround:
+        # "--outDir", "$(RULEDIR)/diag-out",
+        "--outDir", "$(location :diag-)out/",
+    ],
 )
 
 syntax_outs = [
@@ -102,31 +113,36 @@ syntax_outs = [
     "syn-out/TokenKind.cpp",
     "syn-out/KnownSystemName.cpp",
 ]
-genrule(
+run_binary(
     name = "generate_syntax",
     outs = syntax_outs,
-    tools = [":syntax_gen"],
+    tool = ":syntax_gen",
     srcs = [
         ":scripts/syntax.txt",
         ":scripts/triviakinds.txt",
         ":scripts/tokenkinds.txt",
         ":scripts/systemnames.txt",
+        ":syn-", # HACK: see below
     ],
-    cmd = ' '.join([
-        "$(location :syntax_gen)",
-        "--syntax $(location :scripts/syntax.txt)",
-        "--dir $(RULEDIR)/syn-out",
-    ]),
+    args = [
+        "--syntax", "$(location :scripts/syntax.txt)",
+        # NOTE: we want `$(dirname $(location ...))
+        #   - see: https://github.com/bazelbuild/bazel/pull/26236
+        #   - `$(RULEDIR)` is expanded in `genrule`s but not location expansion
+        #
+        # "--dir", "$(RULEDIR)/syn-out",
+        "--dir", "$(location :syn-)out",
+    ],
 )
 
 # slang_export.h
-genrule(
+write_file(
     name = "generate_slang_export",
-    outs = ["include/slang/slang_export.h"],
-    cmd = "{ " + '; '.join([
-        "echo '#pragma once'",
-        "echo '#define SLANG_EXPORT'",
-    ]) + '; } > $(OUTS)',
+    out = "include/slang/slang_export.h",
+    content = [
+        '#pragma once',
+        '#define SLANG_EXPORT',
+    ],
 )
 
 v_maj, v_min, v_patch = module_version().split('.')[:3]

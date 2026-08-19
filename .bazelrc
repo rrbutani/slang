@@ -46,6 +46,23 @@ common --sandbox_fake_hostname=true
 common --sandbox_fake_username=true
 common --worker_sandboxing=true
 
+# repo rules can only access env vars passed with `--repo_env`
+common --incompatible_repo_env_ignores_action_env=true
+
+common:strict_repo_env --experimental_strict_repo_env=true
+common:strict_repo_env --repo_env=PATH=/usr/local/bin:/usr/bin:/bin # use default
+
+# for git:
+common:strict_repo_env --repo_env=SSH_AUTH_SOCK
+common:strict_repo_env --repo_env=GIT_SSH_COMMAND
+common:strict_repo_env --repo_env=SSL_CERT_FILE --repo_env=GIT_SSL_CAINFO
+common:strict_repo_env --repo_env=HOME
+
+# hermetic sandbox, with some carve outs (~matches RBE):
+common:strict_sandboxing --experimental_use_hermetic_linux_sandbox=true
+
+common:strict --config=strict_repo_env --config=strict_sandboxing
+
 ################################################################################
 
 common:path_mapping --experimental_output_paths=strip
@@ -80,6 +97,13 @@ common --modify_execution_info=RunBinary=-supports-path-mapping
 # `libcxx_headers_include_search_directory` cannot be path mapped (json file has
 # unmapped paths)... for now disable path mapping all CopyDirectory actions
 common --modify_execution_info=CopyToDirectory=-supports-path-mapping
+
+# see:
+#   - https://github.com/aspect-build/tools_telemetry/tree/64c64cb40cdbd39ec4c5388f4725f0b33f118c56
+#   - https://github.com/aspect-build/tools_telemetry/blob/64c64cb40cdbd39ec4c5388f4725f0b33f118c56/extension.bzl
+common --repo_env=DO_NOT_TRACK=1
+
+common --platforms @llvm//platforms:linux_x86_64_musl
 
 ################################################################################
 
